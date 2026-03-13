@@ -1,3 +1,23 @@
+function buildClaudeUserContent(user, file) {
+  if (!file) return user;
+  const mediaType = String(file.mediaType || "");
+  const data = String(file.data || "");
+  if (!mediaType || !data) throw new Error("文件内容不完整");
+  if (mediaType === "application/pdf") {
+    return [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data } },
+      { type: "text", text: user },
+    ];
+  }
+  if (mediaType.startsWith("image/")) {
+    return [
+      { type: "image", source: { type: "base64", media_type: mediaType, data } },
+      { type: "text", text: user },
+    ];
+  }
+  throw new Error("当前代理仅支持 PDF 或图片文件识别");
+}
+
 const PROVIDERS = {
   claude: {
     endpoint: "https://api.anthropic.com/v1/messages",
@@ -7,11 +27,11 @@ const PROVIDERS = {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     }),
-    body: ({ model, system, user }) => ({
+    body: ({ model, system, user, file }) => ({
       model,
-      max_tokens: 1200,
+      max_tokens: file ? 1500 : 1200,
       system,
-      messages: [{ role: "user", content: user }],
+      messages: [{ role: "user", content: buildClaudeUserContent(user, file) }],
     }),
     usage: data => ({
       input: data.usage?.input_tokens || 0,
@@ -119,20 +139,31 @@ async function handleRequest(request, env) {
   const payload = await request.json().catch(() => null);
   if (!payload) return json({ error: "请求体不是合法 JSON" }, 400);
 
-  const { provider = "claude", model, system = "", user = "" } = payload;
+  const { provider = "claude", model, system = "", user = "", file = null } = payload;
   const prov = PROVIDERS[provider];
   if (!prov) return json({ error: `不支持的 provider: ${provider}` }, 400);
   if (!model) return json({ error: "缺少 model" }, 400);
   if (!user) return json({ error: "缺少 user prompt" }, 400);
+  if (file && provider !== "claude") {
+    return json({ error: "当前代理模式下，文件识别仅支持 Claude。请切换到 Claude，或先上传 Word/文本文件。" }, 400);
+  }
+  if (file && (!file.data || !file.mediaType)) {
+    return json({ error: "文件负载不完整，缺少 data 或 mediaType" }, 400);
+  }
 
   const apiKey = env[prov.envKey];
   if (!apiKey) return json({ error: `环境变量 ${prov.envKey} 未设置` }, 500);
 
-  const upstream = await fetch(prov.endpoint, {
-    method: "POST",
-    headers: prov.headers(apiKey),
-    body: JSON.stringify(prov.body({ model, system, user })),
-  });
+  let upstream;
+  try {
+    upstream = await fetch(prov.endpoint, {
+      method: "POST",
+      headers: prov.headers(apiKey),
+      body: JSON.stringify(prov.body({ model, system, user, file })),
+    });
+  } catch (error) {
+    return json({ error: error?.message || "构建上游请求失败" }, 400);
+  }
   const data = await upstream.json().catch(() => ({}));
   if (!upstream.ok) {
     return json(

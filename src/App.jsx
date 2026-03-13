@@ -48,6 +48,50 @@ const buildDirCtx = (cands, jobs) => {
   return ctx;
 };
 
+const JOB_PARSE_SYSTEM = "你是资深HR，请从岗位JD中提取招聘信息，严格按JSON格式输出，不含任何markdown标记或额外说明。";
+const JOB_PARSE_PROMPT = `请提取并规范化这份招聘JD，返回 JSON：
+{"title":"职位名称","department":"所属部门","level":"级别/序列","salary":"薪资范围","requirements":"完整的岗位职责和任职要求，尽量保留原文结构","t0":"每行一条硬性必须满足的条件","t1":"每行一条核心评估维度（5-8条）"}
+要求：
+1. title / requirements 尽量完整，不要留空。
+2. 如果原文没有 department / level / salary，可返回空字符串。
+3. t0 只保留必须满足的硬条件。
+4. t1 提炼成用于评估候选人的核心能力维度。
+5. t0 和 t1 用换行符分隔多条内容。`;
+
+const parseJsonResponse = text => {
+  const cleaned = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  try{return JSON.parse(cleaned);}
+  catch{return{error:"JSON解析失败",raw:text};}
+};
+
+const getFileKind = file => {
+  const n = String(file?.name || "").toLowerCase();
+  const type = String(file?.type || "").toLowerCase();
+  if (n.endsWith(".docx")) return "docx";
+  if (type === "application/pdf" || n.endsWith(".pdf")) return "pdf";
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("text/") || [".txt",".md",".markdown",".csv",".json",".html",".htm"].some(ext=>n.endsWith(ext))) return "text";
+  return "unknown";
+};
+
+const readFileAsBase64 = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const result = String(e.target?.result || "");
+    const b64 = result.includes(",") ? result.split(",")[1] : "";
+    resolve({data:b64,mediaType:file.type || "application/octet-stream",name:file.name});
+  };
+  reader.onerror = () => reject(new Error(`读取文件失败：${file.name}`));
+  reader.readAsDataURL(file);
+});
+
+const extractDocxText = async file => {
+  const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js").catch(()=>null);
+  if (!mammoth) throw new Error("无法加载 Word 解析组件，请改用 PDF、图片或纯文本 JD");
+  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return String(result?.value || "").trim();
+};
+
 // ─── CALL AI ─────────────────────────────────────────────────
 async function callAI(cfg, system, user, onTokens, dirCtx="") {
   const {mode="proxy",provider="claude", model, apiKeys={}, proxyUrl="", proxyToken=""} = cfg;
@@ -67,13 +111,11 @@ async function callAI(cfg, system, user, onTokens, dirCtx="") {
     if(onTokens) onTokens(inputT,outputT,provider);
     if(d?.data && typeof d.data==="object") return d.data;
     text=typeof d?.data==="string"?d.data:"";
-    const cleaned=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
-    try{return JSON.parse(cleaned);}
-    catch{return{error:"JSON解析失败",raw:text};}
+    return parseJsonResponse(text);
   }
   if (!apiKey) throw new Error(`请先在「设置」中填写 ${prov.name} 的 API Key`);
   if (provider==="claude") {
-    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01"},body:JSON.stringify({model,max_tokens:1200,system:fullSys,messages:[{role:"user",content:user}]})});
+    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model,max_tokens:1200,system:fullSys,messages:[{role:"user",content:user}]})});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
     const d=await res.json(); inputT=d.usage?.input_tokens||0; outputT=d.usage?.output_tokens||0; text=d.content?.[0]?.text||"";
   } else {
@@ -82,9 +124,72 @@ async function callAI(cfg, system, user, onTokens, dirCtx="") {
     const d=await res.json(); inputT=d.usage?.prompt_tokens||0; outputT=d.usage?.completion_tokens||0; text=d.choices?.[0]?.message?.content||"";
   }
   if(onTokens) onTokens(inputT,outputT,provider);
-  const cleaned=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"").trim();
-  try{return JSON.parse(cleaned);}
-  catch{return{error:"JSON解析失败",raw:text};}
+  return parseJsonResponse(text);
+}
+
+async function callAIWithJobFile(cfg, file, onTokens) {
+  const kind = getFileKind(file);
+  if (kind==="unknown") throw new Error("仅支持 PDF、图片、Word(.docx) 或纯文本 JD 文件");
+
+  if (kind==="text") {
+    const raw = String(await file.text()).trim();
+    if(!raw) throw new Error("JD 文件内容为空，请换一个文件重试");
+    return callAI(cfg, JOB_PARSE_SYSTEM, `${JOB_PARSE_PROMPT}\n\n【JD内容】\n${raw.slice(0,30000)}`, onTokens);
+  }
+
+  if (kind==="docx") {
+    const raw = await extractDocxText(file);
+    if(!raw) throw new Error("未能从 Word JD 中提取到文字，请换成 PDF 或手动粘贴");
+    return callAI(cfg, JOB_PARSE_SYSTEM, `${JOB_PARSE_PROMPT}\n\n【JD内容】\n${raw.slice(0,30000)}`, onTokens);
+  }
+
+  const {mode="proxy",provider="claude",model,apiKeys={},proxyUrl="",proxyToken=""} = cfg;
+  const prov = PROVIDERS[provider] || PROVIDERS.claude;
+  const fullPrompt = `${JOB_PARSE_PROMPT}\n\n请结合上传的 JD 文件内容完成提取。`;
+  const fileB64 = await readFileAsBase64(file);
+
+  if (mode==="proxy") {
+    const url=proxyUrl.trim();
+    if(!url) throw new Error("请先在「设置」中填写代理服务地址");
+    if(provider!=="claude") throw new Error("当前代理模式下，PDF/图片 JD 识别请先切换到 Claude 模型");
+    const headers={"Content-Type":"application/json"};
+    if(proxyToken.trim()) headers.Authorization=`Bearer ${proxyToken.trim()}`;
+    const res=await fetch(url,{method:"POST",headers,body:JSON.stringify({
+      provider,
+      model,
+      system:JOB_PARSE_SYSTEM,
+      user:fullPrompt,
+      file:{name:fileB64.name,mediaType:kind==="pdf"?"application/pdf":fileB64.mediaType,data:fileB64.data}
+    })});
+    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||e.message||`Proxy Error ${res.status}`);}
+    const d=await res.json();
+    if(onTokens) onTokens(d.usage?.input||0,d.usage?.output||0,provider);
+    if(d?.data && typeof d.data==="object") return d.data;
+    return parseJsonResponse(typeof d?.data==="string"?d.data:"");
+  }
+
+  const apiKey = apiKeys[provider] || "";
+  if (!apiKey) throw new Error(`请先在「设置」中填写 ${prov.name} 的 API Key`);
+  if (provider!=="claude") throw new Error("浏览器直连模式下，当前仅支持 Claude 识别 PDF/图片 JD");
+
+  const fileBlock = kind==="pdf"
+    ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileB64.data}}
+    : {type:"image",source:{type:"base64",media_type:fileB64.mediaType,data:fileB64.data}};
+  const res=await fetch(prov.endpoint,{method:"POST",headers:{
+    "Content-Type":"application/json",
+    "x-api-key":apiKey,
+    "anthropic-version":"2023-06-01",
+    "anthropic-dangerous-direct-browser-access":"true"
+  },body:JSON.stringify({
+    model,
+    max_tokens:1500,
+    system:JOB_PARSE_SYSTEM,
+    messages:[{role:"user",content:[fileBlock,{type:"text",text:fullPrompt}]}]
+  })});
+  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
+  const d=await res.json();
+  if(onTokens) onTokens(d.usage?.input_tokens||0,d.usage?.output_tokens||0,provider);
+  return parseJsonResponse(d.content?.[0]?.text||"");
 }
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -212,7 +317,7 @@ export default function App() {
 
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} upcoming={upcoming} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand}/>}
-        {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand}/>}
+        {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs}/>}
       </main>
@@ -446,15 +551,45 @@ const FunnelBar=({label,rate,highlight})=>(
 );
 
 // ─── JOBS VIEW ───────────────────────────────────────────────
-function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick}) {
+function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cfg,recordTokens}) {
   const [open,setOpen]=useState(false);
   const [form,setForm]=useState({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
+  const [jdFile,setJdFile]=useState(null);
+  const [jdLoading,setJdLoading]=useState(false);
+  const [jdErr,setJdErr]=useState("");
+  const [jdDrag,setJdDrag]=useState(false);
   const ff=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const parseJD=async(file)=>{
+    setJdFile(file);setJdErr("");setJdLoading(true);
+    try{
+      const res=await callAIWithJobFile(cfg,file,recordTokens);
+      if(res.error) throw new Error(res.raw||res.error);
+      setForm(p=>({
+        ...p,
+        title:res.title||p.title||"",
+        department:res.department||p.department||"",
+        level:res.level||p.level||"",
+        salary:res.salary||p.salary||"",
+        requirements:res.requirements||p.requirements||"",
+        t0:res.t0||p.t0||"",
+        t1:res.t1||p.t1||"",
+      }));
+    }catch(e){setJdErr(e.message);}
+    setJdLoading(false);
+  };
+
+  const resetCreateForm=()=>{
+    setOpen(false);setJdFile(null);setJdErr("");setJdDrag(false);setJdLoading(false);
+    setForm({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
+  };
+
+  const onJdDrop=e=>{e.preventDefault();setJdDrag(false);const f=e.dataTransfer.files?.[0];if(f)parseJD(f);};
   const saveJob=()=>{
     if(!form.title||!form.requirements)return;
     const j={...form,id:Date.now()};
-    setJobs(p=>[...p,j]);setSelJob(j.id);setOpen(false);
-    setForm({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
+    setJobs(p=>[...p,j]);setSelJob(j.id);
+    resetCreateForm();
   };
   const delJob=id=>{if(window.confirm("确认删除该岗位及所有候选人？")){setJobs(p=>p.filter(j=>j.id!==id));setCands(p=>p.filter(c=>c.jobId!==id));if(selJob===id)setSelJob(null);}};
   const job=jobs.find(j=>j.id===selJob);
@@ -469,9 +604,35 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick}) 
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{padding:"12px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,fontWeight:700,color:T.text}}>岗位列表</span>
-          <button onClick={()=>setOpen(!open)} style={{padding:"4px 10px",background:T.accent,color:T.accentFg,border:"none",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 新建</button>
+          <button onClick={()=>{if(open)resetCreateForm();else setOpen(true);}} style={{padding:"4px 10px",background:T.accent,color:T.accentFg,border:"none",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 新建</button>
         </div>
         {open&&(<div style={{padding:14,borderBottom:`1px solid ${T.border}`,background:T.card2}}>
+          <div style={{marginBottom:12,padding:"12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+              <label style={{...lbSt(T),marginBottom:0}}>上传岗位 JD（AI 自动填表）</label>
+              <button onClick={()=>!jdLoading&&document.getElementById("job-jd-file-input")?.click()}
+                style={{padding:"7px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:jdLoading?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:jdLoading?0.5:1}}>
+                上传岗位JD
+              </button>
+            </div>
+            <div
+              onDragOver={e=>{e.preventDefault();setJdDrag(true);}}
+              onDragLeave={()=>setJdDrag(false)}
+              onDrop={onJdDrop}
+              onClick={()=>!jdLoading&&document.getElementById("job-jd-file-input")?.click()}
+              style={{border:`2px dashed ${jdDrag?T.accent:T.border2}`,borderRadius:10,padding:"16px 14px",textAlign:"center",cursor:jdLoading?"default":"pointer",background:jdDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s"}}>
+              <input id="job-jd-file-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}}
+                onChange={e=>{const f=e.target.files?.[0];if(f)parseJD(f);e.target.value="";}}/>
+              {jdLoading
+                ?<div><Spin text="AI 正在识别 JD..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动填入下面的岗位表单</div></div>
+                :jdFile
+                  ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已识别：{jdFile.name}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>字段已自动回填，你仍然可以手动修改</div></div>
+                  :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入 JD 文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>支持 PDF、图片、Word(.docx) 和纯文本 JD</div></div>
+              }
+            </div>
+            {jdErr&&<div style={{fontSize:11,color:"#dc2626",marginTop:8}}>{jdErr}</div>}
+            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>AI 已自动提取岗位信息，可继续补充或修正后保存。</div>}
+          </div>
           {[["职位名称 *","title","短视频剪辑师"],["所属部门","department","AI MCN"],["级别","level","mid"],["薪酬","salary","15-25K"]].map(([l,k,ph])=>(
             <Inp key={k} T={T} label={l} placeholder={ph} value={form[k]} onChange={ff(k)}/>
           ))}
@@ -479,8 +640,8 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick}) 
           <div style={{marginBottom:9}}><label style={lbSt(T)}>T0 硬性条件（每行一条）</label><textarea rows={2} style={{...inSt(T),resize:"vertical"}} placeholder={"2年以上经验\n熟练使用剪映"} value={form.t0} onChange={ff("t0")}/></div>
           <div style={{marginBottom:12}}><label style={lbSt(T)}>T1 核心维度（每行一条）</label><textarea rows={2} style={{...inSt(T),resize:"vertical"}} placeholder={"目标导向\n团队协作\n自驱力"} value={form.t1} onChange={ff("t1")}/></div>
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setOpen(false)} style={{flex:1,padding:"8px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>取消</button>
-            <button onClick={saveJob} style={{flex:2,padding:"8px",background:T.accent,color:T.accentFg,border:"none",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700,opacity:form.title&&form.requirements?1:0.4}} disabled={!form.title||!form.requirements}>保存</button>
+            <button onClick={resetCreateForm} style={{flex:1,padding:"8px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>取消</button>
+            <button onClick={saveJob} style={{flex:2,padding:"8px",background:T.accent,color:T.accentFg,border:"none",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700,opacity:form.title&&form.requirements&&!jdLoading?1:0.4}} disabled={!form.title||!form.requirements||jdLoading}>保存</button>
           </div>
         </div>)}
         <div style={{overflowY:"auto",maxHeight:"calc(100vh - 220px)"}}>
