@@ -32,6 +32,7 @@ PORT=8787 ANTHROPIC_API_KEY=your_key npm run proxy
 - 输出目录：`dist`
 - Pages Functions 文件位置：`functions/api/ai.js`
 - 云端状态 API：`functions/api/state.js`
+- 学习系统 API：`functions/api/knowledge.js`
 - 可选前端环境变量：`VITE_HR_PROXY_URL`、`VITE_HR_PROXY_TOKEN`
 - 必填服务端环境变量：至少一个模型平台的 API Key
 - 可选服务端环境变量：`HR_PROXY_TOKEN`
@@ -52,6 +53,18 @@ Cloudflare Pages 部署时，前端和代理函数会走同一个域名，默认
 - 继续保留浏览器 `localStorage` 作为本地缓存
 - 在岗位、候选人、面试记录或设置变更后自动同步回 D1
 - 如果表还不存在，`/api/state` 会在首次请求时自动创建 `hr_state`
+- `/api/knowledge` 会自动创建 `learning_samples`、`rubric_versions`、`question_bank_versions`
+
+### 学习系统最小实现
+
+当前已经接入一版“招聘学习循环”：
+
+- 保存总监判断时，会自动写入 `learning_samples`
+- 同岗位样本累计到一定数量后，会自动生成新的 `rubric_versions`
+- 同时生成新的 `question_bank_versions`
+- 后续简历筛选和面试题生成，会优先读取最新规则和题库
+
+这不是模型权重微调，而是“历史样本 -> 规则版本 -> 题库版本 -> 下次调用增强”的检索增强式学习。
 
 注意：
 
@@ -79,6 +92,7 @@ Cloudflare Pages 部署时，前端和代理函数会走同一个域名，默认
 ├── functions/
 │   └── api/
 │       ├── ai.js
+│       ├── knowledge.js
 │       └── state.js
 ├── d1/
 │   └── schema.sql

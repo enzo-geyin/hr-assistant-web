@@ -7,7 +7,9 @@ const save = (k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 const ENV_PROXY_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_URL?import.meta.env.VITE_HR_PROXY_URL:"/api/ai";
 const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_TOKEN?import.meta.env.VITE_HR_PROXY_TOKEN:"";
 const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
+const ENV_KNOWLEDGE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_KNOWLEDGE_URL?import.meta.env.VITE_HR_KNOWLEDGE_URL:"/api/knowledge";
 const CLOUD_SCHEMA_VERSION = 1;
+const KNOWLEDGE_MIN_SAMPLES = 2;
 
 const DEFAULT_CFG = {
   mode:"proxy",
@@ -81,6 +83,26 @@ async function pushCloudState(token = "", state) {
   return data;
 }
 
+async function fetchKnowledgeState(token = "", jobId) {
+  if (!jobId) return { sampleCount: 0, recentSamples: [], rubric: null, questionBank: null };
+  const url = `${ENV_KNOWLEDGE_URL}?jobId=${encodeURIComponent(jobId)}`;
+  const res = await fetch(url, { headers: buildCloudHeaders(token) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `学习数据读取失败 ${res.status}`);
+  return data;
+}
+
+async function postKnowledgeAction(token = "", payload) {
+  const res = await fetch(ENV_KNOWLEDGE_URL, {
+    method: "POST",
+    headers: { ...buildCloudHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `学习数据写入失败 ${res.status}`);
+  return data;
+}
+
 // ─── PROVIDERS ───────────────────────────────────────────────
 const PROVIDERS = {
   claude:   {name:"Claude",  color:"#d97706",logo:"C",endpoint:"https://api.anthropic.com/v1/messages",          keyPlaceholder:"sk-ant-api03-...",models:[{id:"claude-sonnet-4-20250514",name:"Sonnet 4",note:"推荐"},{id:"claude-opus-4-5",name:"Opus 4.5",note:"最强"},{id:"claude-haiku-4-5-20251001",name:"Haiku 4.5",note:"极速"}],pricing:{"claude-sonnet-4-20250514":{in:3,out:15},"claude-opus-4-5":{in:15,out:75},"claude-haiku-4-5-20251001":{in:0.8,out:4}}},
@@ -118,6 +140,7 @@ const JOB_PARSE_PROMPT = `请识别这份JD文件中的全部岗位，返回 JSO
 4. t0 只保留必须满足的硬门槛，例如年限、学历、证书、工具、行业经验。
 5. t1 只保留评估候选人的核心能力维度，例如目标导向、数据分析、沟通协作。
 6. 缺失字段返回空字符串或空数组。`;
+const LEARNING_SYSTEM = "你是招聘策略学习助手。请从历史筛选、面试和总监判断中提炼岗位判断规则与高质量面试题库。必须严格输出 JSON，不要输出 markdown、解释或多余文本。";
 
 const stripModelNoise = text => String(text || "")
   .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -250,12 +273,61 @@ const normalizeJobParseResult = result => {
     .filter(job => job.requirements || job.t0 || job.t1);
 };
 
-const buildScreeningPrompt = (job, resume) => {
+const formatRubricContext = knowledge => {
+  const summary = cleanListLine(knowledge?.rubricSummary || "");
+  const rubric = knowledge?.rubric;
+  if (!rubric && !summary) return "";
+  const lines = ["【岗位学习规则】"];
+  if (summary) lines.push(`规则摘要：${summary}`);
+  const hardRequirements = toLineArray(rubric?.hardRequirements, 8);
+  if (hardRequirements.length) lines.push(`最新硬门槛：${hardRequirements.join("；")}`);
+  const dimensions = Array.isArray(rubric?.coreDimensions)
+    ? rubric.coreDimensions
+        .map(item => `${cleanListLine(item?.dimension)}(${cleanListLine(item?.weight || "中")})${cleanListLine(item?.note) ? `：${cleanListLine(item.note)}` : ""}`)
+        .filter(Boolean)
+    : [];
+  if (dimensions.length) lines.push(`重点评估维度：${dimensions.join("；")}`);
+  const passSignals = toLineArray(rubric?.passSignals, 6);
+  if (passSignals.length) lines.push(`优先录用信号：${passSignals.join("；")}`);
+  const redFlags = toLineArray(rubric?.redFlags, 6);
+  if (redFlags.length) lines.push(`高风险信号：${redFlags.join("；")}`);
+  const tips = toLineArray(rubric?.calibrationTips, 6);
+  if (tips.length) lines.push(`评分校准建议：${tips.join("；")}`);
+  return lines.join("\n");
+};
+
+const formatQuestionBankContext = knowledge => {
+  const summary = cleanListLine(knowledge?.questionBankSummary || "");
+  const bank = knowledge?.questionBank;
+  if (!bank && !summary) return "";
+  const lines = ["【学习后的面试题库偏好】"];
+  if (summary) lines.push(`题库摘要：${summary}`);
+  const sections = [
+    ["mustAsk", "必问题"],
+    ["behavioral", "行为题"],
+    ["technical", "专业题"],
+    ["redFlagChecks", "红旗排查题"],
+    ["followUps", "高价值追问"],
+  ];
+  sections.forEach(([key, label]) => {
+    const items = Array.isArray(bank?.[key]) ? bank[key].slice(0, 3) : [];
+    if (!items.length) return;
+    lines.push(`${label}：${items.map(item => {
+      const question = cleanListLine(item?.question || "");
+      const targetDimension = cleanListLine(item?.targetDimension || "");
+      return targetDimension ? `${question}（考察 ${targetDimension}）` : question;
+    }).filter(Boolean).join("；")}`);
+  });
+  return lines.join("\n");
+};
+
+const buildScreeningPrompt = (job, resume, learningCtx="") => {
   const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
   const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
   return `岗位：${job?.title||"未知"} 部门：${job?.department||""} 要求：${job?.requirements||""}
 ${t0?`T0硬性条件：[${t0}]`:"请自行从要求中提取T0硬性条件"}
 ${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
+${learningCtx?`\n${learningCtx}`:""}
 薪酬：${job?.salary||"不限"} 简历：${resume}
 输出JSON：{"candidateName":"候选人姓名（如能识别）","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
 "t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
@@ -264,6 +336,121 @@ ${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
 "fineScreen":{"education":{"score":3,"maxScore":5,"note":""},"industryRisk":{"score":3,"maxScore":5,"note":""},"tenureMatch":{"score":4,"maxScore":5,"note":""},"salaryReason":{"score":5,"maxScore":5,"note":""}},
 "risks":["风险1"]}`;
 };
+
+const buildQuestionPrompt = (job, cand, knowledge) => {
+  const rubricCtx = formatRubricContext(knowledge);
+  const bankCtx = formatQuestionBankContext(knowledge);
+  return `岗位：${job?.title} 要求：${job?.requirements}
+简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
+风险：${JSON.stringify(cand.screening?.risks||[])}
+${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}生成10道结构化面试题，返回JSON：
+{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
+步骤：1.开场破冰 2.自我介绍 3.离职动机 4.行为面试STAR(4-5题) 5.专业题(2题) 6.反问
+要求：优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。`;
+};
+
+const summarizeInterviews = cand => (cand.interviews||[])
+  .map(ir => {
+    const ast = ir.assessment || {};
+    const highlights = Array.isArray(ast.highlights) ? ast.highlights.join("、") : "";
+    const concerns = Array.isArray(ast.concerns) ? ast.concerns.join("、") : "";
+    return `${ir.round || "面试"}：结论${ast.decision || "未定"}；建议${ast.suggestion || "无"}；亮点${highlights || "无"}；顾虑${concerns || "无"}`;
+  })
+  .join("\n");
+
+const buildLearningSample = (cand, job, verdict, reason) => {
+  const aiRecommendation = cand.screening?.recommendation || "";
+  const directorVerdict = verdict || "";
+  const mismatchType = !aiRecommendation
+    ? "manual_only"
+    : (aiRecommendation==="建议通过"&&["录用","通过"].includes(directorVerdict))||(aiRecommendation==="建议淘汰"&&directorVerdict==="淘汰")
+      ? "aligned"
+      : "corrective";
+  const deltaNotes = [
+    cand.screening?.risks?.length ? `筛选风险：${cand.screening.risks.join("；")}` : "",
+    summarizeInterviews(cand),
+  ].filter(Boolean).join("\n");
+  return {
+    jobId: job?.id,
+    candidateId: cand.id,
+    jobTitle: job?.title || "",
+    candidateName: cand.name || "",
+    aiRecommendation,
+    aiScore: cand.screening?.overallScore || null,
+    directorVerdict,
+    directorReason: reason,
+    screeningSummary: cand.screening?.summary || "",
+    interviewSummary: summarizeInterviews(cand),
+    mismatchType,
+    deltaNotes,
+    samplePayload: {
+      screening: cand.screening || null,
+      questions: cand.questions || null,
+      interviews: cand.interviews || [],
+      directorReason: reason,
+      job: job || null,
+    },
+  };
+};
+
+const buildLearningSynthesisPrompt = (job, samples) => `请基于同一岗位的历史样本，提炼可执行的招聘判断规则和面试题库。
+岗位：${job?.title||"未知"} 部门：${job?.department||""}
+当前岗位要求：${job?.requirements||""}
+当前T0：${job?.t0||"无"}
+当前T1：${job?.t1||"无"}
+历史样本（最近${samples.length}条）：
+${samples.map((sample, index) => `样本${index+1}：
+- 候选人：${sample.candidateName||"未命名"}
+- AI建议：${sample.aiRecommendation||"无"} / AI评分：${sample.aiScore||"无"}
+- 总监结论：${sample.directorVerdict||"无"}
+- 总监原因：${sample.directorReason||"无"}
+- 简历总结：${sample.screeningSummary||"无"}
+- 面试摘要：${sample.interviewSummary||"无"}
+- 偏差类型：${sample.mismatchType||"无"}
+- 备注：${sample.deltaNotes||"无"}`).join("\n\n")}
+输出JSON：
+{"rubricSummary":"一句话总结这一岗位最新判断基准","rubric":{"hardRequirements":["硬门槛"],"coreDimensions":[{"dimension":"维度","weight":"高|中|低","note":"评分说明"}],"passSignals":["优先录用信号"],"redFlags":["高风险信号"],"calibrationTips":["避免误判的评分提醒"]},"questionBankSummary":"一句话总结最新题库策略","questionBank":{"mustAsk":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"behavioral":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"technical":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"redFlagChecks":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"followUps":[{"question":"追问","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}]}}
+要求：
+1. 规则一定要能指导后续筛选和面试，不要空泛。
+2. 题库必须围绕高区分度问题，不要重复。
+3. 如果历史样本不足，仍需输出一个保守版本。`;
+
+async function learnFromDirectorFeedback(cfg, cand, job, verdict, reason, recordTokens) {
+  if (!job?.id) return { sampleCount: 0, updatedKnowledge: false };
+  const token = cfg?.proxyToken || "";
+  const sample = buildLearningSample(cand, job, verdict, reason);
+  const sampleRes = await postKnowledgeAction(token, { action: "recordSample", sample });
+  const sampleCount = Number(sampleRes?.sampleCount) || 1;
+  if (sampleCount < KNOWLEDGE_MIN_SAMPLES) return { sampleCount, updatedKnowledge: false };
+
+  const knowledge = await fetchKnowledgeState(token, job.id);
+  const recentSamples = Array.isArray(knowledge?.recentSamples) ? knowledge.recentSamples : [];
+  const synthesis = await callAI(
+    cfg,
+    LEARNING_SYSTEM,
+    buildLearningSynthesisPrompt(job, recentSamples),
+    recordTokens,
+    "",
+    { maxTokens: 2600 }
+  );
+  if (synthesis.error) throw new Error(synthesis.raw || synthesis.error);
+
+  const saveRes = await postKnowledgeAction(token, {
+    action: "saveKnowledge",
+    jobId: job.id,
+    rubric: synthesis.rubric || {},
+    rubricSummary: synthesis.rubricSummary || "",
+    questionBank: synthesis.questionBank || {},
+    questionBankSummary: synthesis.questionBankSummary || "",
+    sourceSampleCount: sampleCount,
+  });
+  return {
+    sampleCount,
+    updatedKnowledge: true,
+    rubricVersion: saveRes?.rubricVersion || null,
+    questionBankVersion: saveRes?.questionBankVersion || null,
+  };
+}
 
 const getFileKind = file => {
   const n = String(file?.name || "").toLowerCase();
@@ -1068,6 +1255,30 @@ function CandidatesView({T,cands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
 function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
+  const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
+  const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
+  const refreshLearning=async()=>{
+    if(!job?.id){setLearning({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});setLearningState({loading:false,error:""});return;}
+    setLearningState({loading:true,error:""});
+    try{
+      const data=await fetchKnowledgeState(cfg.proxyToken||"",job.id);
+      setLearning({
+        sampleCount:Number(data?.sampleCount)||0,
+        recentSamples:Array.isArray(data?.recentSamples)?data.recentSamples:[],
+        rubric:data?.rubric||null,
+        rubricSummary:data?.rubricSummary||"",
+        rubricVersion:data?.rubricVersion||null,
+        questionBank:data?.questionBank||null,
+        questionBankSummary:data?.questionBankSummary||"",
+        questionBankVersion:data?.questionBankVersion||null,
+      });
+      setLearningState({loading:false,error:""});
+    }catch(error){
+      setLearningState({loading:false,error:error?.message||"学习规则读取失败"});
+    }
+  };
+  useEffect(()=>{refreshLearning();},[job?.id,cfg.proxyToken]);
+
   const tabs=[
     {id:"screening",label:"① 简历筛选"},
     {id:"questions",label:"② 面试题",disabled:!cand.screening},
@@ -1100,16 +1311,16 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
         style={{flex:1,padding:"7px 4px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:7,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?700:400,opacity:t.disabled?0.4:1,transition:"all 0.1s"}}
         disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
-    {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>}
-    {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>}
+    {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
+    {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
     {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>}
-    {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} updCand={updCand}/>}
+    {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
     {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
   </div>);
 }
 
 // ─── SCREEN TAB ──────────────────────────────────────────────
-function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
+function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState}) {
   const [name,setName]=useState(cand.name||"");
   const [resume,setResume]=useState(cand.resume||"");
   const [inputMode,setInputMode]=useState(cand.resumeFileName?"file":"text");
@@ -1118,6 +1329,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
   const [drag,setDrag]=useState(false);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
+  const learningHint = formatRubricContext(learning);
 
   const queueResumeFile=file=>{
     if(!file) return;
@@ -1138,7 +1350,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
     try{
       const res=await callAI(cfg,
         `你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。`,
-        buildScreeningPrompt(job, normalizedResume),
+        buildScreeningPrompt(job, normalizedResume, learningHint),
         recordTokens,dirCtx,
         {maxTokens:2200}
       );
@@ -1223,6 +1435,8 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
         <textarea rows={12} value={resume} onChange={e=>setResume(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.6}} placeholder={"将简历文字粘贴到此处...\n包括：基本信息、教育背景、工作经历、技能特长等"}/>
       </div>}
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入你的历史判断标准，AI评估将更贴近你的用人偏好</div>}
+      {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:8,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位的学习规则，当前会先按已有岗位要求筛选</div>}
+      {!learningState?.loading&&learningHint&&<div style={{fontSize:11,color:"#0f766e",marginBottom:8,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载该岗位学习规则，筛选会参考最新硬门槛、风险信号和评分校准</div>}
       {err&&<ErrBox>{err}</ErrBox>}
       {inputMode==="file"&&<BtnPrimary T={T} loading={loading} disabled={loading||(!resumeFile&&!resumeFileName)} onClick={analyzeFile}>{loading?<Spin text="AI 正在分析简历文件..."/>:"识别并智能筛选 →"}</BtnPrimary>}
       {inputMode==="text"&&<BtnPrimary T={T} loading={loading} disabled={loading||!resume.trim()} onClick={analyzeText}>{loading?<Spin text="AI 正在分析简历..."/>:"AI 智能筛选 →"}</BtnPrimary>}
@@ -1274,7 +1488,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
 }
 
 // ─── QUESTION TAB ────────────────────────────────────────────
-function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
+function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState}) {
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const gen=async()=>{
@@ -1282,12 +1496,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
     try{
       const res=await callAI(cfg,
         `你是资深HR面试官，请严格按JSON格式输出，不含任何markdown标记。`,
-        `岗位：${job?.title} 要求：${job?.requirements}
-简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
-风险：${JSON.stringify(cand.screening?.risks||[])}
-生成10道结构化面试题，返回JSON：
-{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
-步骤：1.开场破冰 2.自我介绍 3.离职动机 4.行为面试STAR(4-5题) 5.专业题(2题) 6.反问`,
+        buildQuestionPrompt(job, cand, learning),
         recordTokens,dirCtx
       );
       if(res.error) throw new Error(res.error);
@@ -1300,6 +1509,8 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
     {!qs?(<SCard T={T} title="生成面试题">
       <div style={{fontSize:13,color:T.text3,marginBottom:14}}>基于岗位要求和简历分析，AI 生成结构化面试题，含好/差/红旗回答参考</div>
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入总监历史判断标准，面试题将更贴近你的用人偏好</div>}
+      {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位最新规则与题库，当前先按岗位要求生成面试题</div>}
+      {!learningState?.loading&&formatQuestionBankContext(learning)&&<div style={{fontSize:11,color:"#0f766e",marginBottom:10,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载学习后的题库偏好，面试题会优先覆盖高区分度问题和风险排查</div>}
       {err&&<ErrBox>{err}</ErrBox>}
       <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
     </SCard>):(<div>
@@ -1457,20 +1668,37 @@ function IRecord({T,record}) {
 }
 
 // ─── DIRECTOR TAB ────────────────────────────────────────────
-function DirectorTab({T,cand,updCand}) {
+function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState,refreshLearning}) {
   const dir=cand.directorVerdict||{};
   const [verdict,setVerdict]=useState(dir.verdict||"");
   const [reason,setReason]=useState(dir.reason||"");
+  const [saving,setSaving]=useState(false);
+  const [learningMsg,setLearningMsg]=useState("");
   const saved=dir.verdict&&dir.reason;
   const aiRec=cand.screening?.recommendation;
   const match=saved&&((aiRec==="建议通过"&&["录用","通过"].includes(dir.verdict))||(aiRec==="建议淘汰"&&dir.verdict==="淘汰"));
 
-  const save=()=>{
+  const save=async()=>{
     if(!verdict||!reason.trim())return;
+    setSaving(true);
+    setLearningMsg("正在保存判断并沉淀学习样本...");
     updCand(cand.id,{
       directorVerdict:{verdict,reason,date:new Date().toLocaleDateString("zh-CN"),aiRec},
       status:verdict==="录用"?"offer":verdict==="淘汰"?"rejected":cand.status
     });
+    try{
+      const res=await learnFromDirectorFeedback(cfg,cand,job,verdict,reason.trim(),recordTokens);
+      if(res.updatedKnowledge){
+        setLearningMsg(`已新增学习样本，并更新岗位规则 v${res.rubricVersion||"-"} / 题库 v${res.questionBankVersion||"-"}`);
+        if(refreshLearning) await refreshLearning();
+      }else{
+        setLearningMsg(`已新增学习样本，当前累计 ${res.sampleCount} 条；达到 ${KNOWLEDGE_MIN_SAMPLES} 条后会自动更新规则与题库`);
+        if(refreshLearning) await refreshLearning();
+      }
+    }catch(error){
+      setLearningMsg(`判断已保存，但学习沉淀失败：${error?.message||"请稍后重试"}`);
+    }
+    setSaving(false);
   };
 
   return(<div>
@@ -1480,6 +1708,21 @@ function DirectorTab({T,cand,updCand}) {
         你对候选人的最终判断和点评，将自动积累成 AI 的参考标准。<br/>
         <strong style={{color:T.accent}}>积累越多，AI 越懂你的用人偏好，评估越准。</strong>
       </div>
+    </div>
+    <div style={{...cardSt(T),marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:T.text}}>岗位学习状态</div>
+          <div style={{fontSize:12,color:T.text4,marginTop:4}}>
+            当前岗位已沉淀 {Number(learning?.sampleCount)||0} 条学习样本
+            {learning?.rubricVersion?` · 规则 v${learning.rubricVersion}`:" · 暂无规则版本"}
+            {learning?.questionBankVersion?` · 题库 v${learning.questionBankVersion}`:" · 暂无题库版本"}
+          </div>
+        </div>
+        {learningState?.loading&&<Chip c="#2563eb" bg="#eff6ff">学习数据加载中</Chip>}
+        {!learningState?.loading&&learning?.rubricVersion&&<Chip c="#059669" bg="#ecfdf5">已启用学习规则</Chip>}
+      </div>
+      {learningMsg&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7}}>{learningMsg}</div>}
     </div>
 
     {cand.screening&&(
@@ -1518,8 +1761,8 @@ function DirectorTab({T,cand,updCand}) {
         <textarea rows={4} value={reason} onChange={e=>setReason(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.7}}
           placeholder={"简短记录你的核心判断依据...\n例：\n· 执行力强，见过大项目，能快速上手\n· 内容思维好但数据意识不足\n· 稳定性有顾虑但潜力值得冒险"}/>
       </div>
-      <BtnPrimary T={T} onClick={save} disabled={!verdict||!reason.trim()}>
-        {saved?"更新判断":"保存判断 · 沉淀为AI参考"}
+      <BtnPrimary T={T} onClick={save} disabled={saving||!verdict||!reason.trim()}>
+        {saving?<Spin text="沉淀学习中..."/>:(saved?"更新判断":"保存判断 · 沉淀为AI参考")}
       </BtnPrimary>
       {saved&&<div style={{marginTop:10,fontSize:12,color:T.text3}}>✓ 已保存于 {dir.date}</div>}
     </SCard>
