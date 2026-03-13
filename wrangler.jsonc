@@ -2,5 +2,12 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "hr-assistant-web",
   "pages_build_output_dir": "./dist",
-  "compatibility_date": "2026-03-13"
+  "compatibility_date": "2026-03-13",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hr-assistant-db",
+      "database_id": "322eb018-2fe0-487d-a751-13de00bc1855"
+    }
+  ]
 }
