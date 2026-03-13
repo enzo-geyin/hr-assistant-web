@@ -59,10 +59,57 @@ const JOB_PARSE_PROMPT = `请提取并规范化这份招聘JD，返回 JSON：
 4. t1 提炼成用于评估候选人的核心能力维度。
 5. t0 和 t1 用换行符分隔多条内容。`;
 
+const stripModelNoise = text => String(text || "")
+  .replace(/<think>[\s\S]*?<\/think>/gi, "")
+  .replace(/^```(?:json)?\s*/i, "")
+  .replace(/\s*```$/i, "")
+  .trim();
+
+const extractBalancedJson = text => {
+  const src = String(text || "");
+  const start = Math.min(
+    ...["{", "["].map(ch => {
+      const idx = src.indexOf(ch);
+      return idx === -1 ? Number.POSITIVE_INFINITY : idx;
+    })
+  );
+  if (!Number.isFinite(start)) return "";
+
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < src.length; i += 1) {
+    const ch = src[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === "\"") inString = false;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      const last = stack[stack.length - 1];
+      if ((ch === "}" && last === "{") || (ch === "]" && last === "[")) {
+        stack.pop();
+        if (!stack.length) return src.slice(start, i + 1);
+      }
+    }
+  }
+  return "";
+};
+
 const parseJsonResponse = text => {
-  const cleaned = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  try{return JSON.parse(cleaned);}
-  catch{return{error:"JSON解析失败",raw:text};}
+  const cleaned = stripModelNoise(text);
+  const candidates = [cleaned, extractBalancedJson(cleaned)].filter(Boolean);
+  for (const candidate of candidates) {
+    try{return JSON.parse(candidate);}
+    catch{}
+  }
+  return{error:"JSON解析失败",raw:text};
 };
 
 const OCR_LANG = "chi_sim+eng";
@@ -201,7 +248,9 @@ async function callAI(cfg, system, user, onTokens, dirCtx="") {
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
     const d=await res.json(); inputT=d.usage?.input_tokens||0; outputT=d.usage?.output_tokens||0; text=d.content?.[0]?.text||"";
   } else {
-    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},body:JSON.stringify({model,max_tokens:1200,messages:[{role:"system",content:fullSys},{role:"user",content:user}]})});
+    const body={model,max_tokens:1200,messages:[{role:"system",content:fullSys},{role:"user",content:user}]};
+    if(provider==="deepseek") body.response_format={type:"json_object"};
+    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},body:JSON.stringify(body)});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
     const d=await res.json(); inputT=d.usage?.prompt_tokens||0; outputT=d.usage?.completion_tokens||0; text=d.choices?.[0]?.message?.content||"";
   }

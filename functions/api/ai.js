@@ -70,6 +70,7 @@ const PROVIDERS = {
     body: ({ model, system, user }) => ({
       model,
       max_tokens: 1200,
+      response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -114,17 +115,58 @@ function json(payload, status = 200) {
   });
 }
 
-function parseModelJSON(text) {
-  const cleaned = String(text || "")
-    .trim()
+function stripModelNoise(text) {
+  return String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
+    .replace(/\s*```$/i, "")
     .trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    return cleaned;
+}
+
+function extractBalancedJson(text) {
+  const src = String(text || "");
+  const firstBrace = src.indexOf("{");
+  const firstBracket = src.indexOf("[");
+  const starts = [firstBrace, firstBracket].filter(idx => idx >= 0);
+  if (!starts.length) return "";
+  const start = Math.min(...starts);
+
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < src.length; i += 1) {
+    const ch = src[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === "\"") inString = false;
+      continue;
+    }
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") {
+      const last = stack[stack.length - 1];
+      if ((ch === "}" && last === "{") || (ch === "]" && last === "[")) {
+        stack.pop();
+        if (!stack.length) return src.slice(start, i + 1);
+      }
+    }
   }
+  return "";
+}
+
+function parseModelJSON(text) {
+  const cleaned = stripModelNoise(text);
+  const candidates = [cleaned, extractBalancedJson(cleaned)].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch {}
+  }
+  return cleaned;
 }
 
 async function handleRequest(request, env) {
