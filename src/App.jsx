@@ -85,9 +85,15 @@ const readFileAsBase64 = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const resolveMammoth = mod => {
+  const candidates = [mod, mod?.default, mod?.mammoth, mod?.default?.mammoth, globalThis?.mammoth];
+  return candidates.find(candidate => typeof candidate?.extractRawText === "function") || null;
+};
+
 const extractDocxText = async file => {
-  const mammoth = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js").catch(()=>null);
-  if (!mammoth) throw new Error("无法加载 Word 解析组件，请改用 PDF、图片或纯文本 JD");
+  const mod = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js").catch(()=>null);
+  const mammoth = resolveMammoth(mod);
+  if (!mammoth) throw new Error("Word 解析组件加载失败，请改用 PDF、图片或纯文本 JD");
   const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
   return String(result?.value || "").trim();
 };
