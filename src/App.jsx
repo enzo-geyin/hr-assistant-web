@@ -782,7 +782,7 @@ export default function App() {
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} upcoming={upcoming} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
     </div>
@@ -1213,10 +1213,22 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare}) {
+function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare}) {
   const cand=cands.find(c=>c.id===selCand);
   const job=jobs.find(j=>j.id===cand?.jobId);
+  const [showImport,setShowImport]=useState(false);
+  const onCreated=candidate=>{
+    setCands(prev=>[candidate,...prev]);
+    setSelCand(candidate.id);
+    setTab("screening");
+    setShowImport(false);
+  };
   return(<Page T={T} title="候选人" sub="管理所有候选人及评估进度">
+    {showImport&&<ResumeImportModal T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated}/>}
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>在候选人库里直接上传简历，系统会自动识别文字、规整简历，并按所选岗位完成初筛。</div>
+      <button onClick={()=>setShowImport(true)} style={{padding:"9px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>+ 上传简历</button>
+    </div>
     <div style={{display:"grid",gridTemplateColumns:"256px 1fr",gap:20}}>
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text}}>全部候选人 ({cands.length})</div>
@@ -1251,6 +1263,138 @@ function CandidatesView({T,cands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
+}
+
+function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
+  const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "");
+  const [name,setName]=useState("");
+  const [resumeFile,setResumeFile]=useState(null);
+  const [resumeFileName,setResumeFileName]=useState("");
+  const [drag,setDrag]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [info,setInfo]=useState("");
+  const selectedJob=jobs.find(j=>String(j.id)===String(jobId));
+
+  const queueResumeFile=file=>{
+    if(!file) return;
+    if(getFileKind(file)==="unknown"){setErr("仅支持 PDF、图片、Word(.docx) 或纯文本简历文件");return;}
+    setResumeFile(file);
+    setResumeFileName(file.name);
+    setErr("");
+    setInfo("");
+  };
+
+  const submit=async()=>{
+    if(!selectedJob){setErr("请先选择岗位");return;}
+    if(!resumeFile){setErr("请先上传简历文件");return;}
+    setErr("");setInfo("");setLoading(true);
+    try{
+      const extractedResume=await extractFileText(resumeFile);
+      const normalizedResume=normalizeExtractedText(extractedResume).slice(0,30000);
+      if(!normalizedResume) throw new Error("未能从简历中提取出有效文字，请换一个更清晰的文件");
+
+      let learning={rubric:null,rubricSummary:"",questionBank:null,questionBankSummary:""};
+      try{
+        learning=await fetchKnowledgeState(cfg.proxyToken||"",selectedJob.id);
+      }catch{}
+
+      const res=await callAI(
+        cfg,
+        `你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。`,
+        buildScreeningPrompt(selectedJob, normalizedResume, formatRubricContext(learning)),
+        recordTokens,
+        dirCtx,
+        {maxTokens:2200}
+      );
+      if(res.error) throw new Error(res.raw||res.error);
+
+      const candidateName=name.trim()||res.candidateName||"未命名";
+      const candidate={
+        id:Date.now(),
+        jobId:selectedJob.id,
+        name:candidateName,
+        status:res.recommendation==="建议通过"?"screening":res.recommendation==="待定"?"watching":"rejected",
+        resume:normalizedResume,
+        resumeFileName:resumeFile.name,
+        screening:res,
+        questions:null,
+        interviews:[],
+        scheduledAt:null,
+        interviewRound:null,
+        directorVerdict:null,
+      };
+      setInfo(`已完成识别与初筛：${candidateName} / ${res.recommendation}`);
+      onCreated(candidate);
+    }catch(error){
+      setErr(error?.message||"上传简历失败");
+    }
+    setLoading(false);
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.45)",zIndex:220,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"48px 20px",overflowY:"auto"}} onClick={onClose}>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:16,width:"100%",maxWidth:760,padding:"22px 24px",boxShadow:"0 24px 80px rgba(15,23,42,0.18)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:18}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:T.text}}>上传简历</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>在候选人库里直接上传 PDF / 图片 / Word 简历，系统会自动识别文字、规整信息，并创建候选人档案。</div>
+          </div>
+          <button onClick={onClose} style={{border:"none",background:"transparent",fontSize:18,color:T.text4,cursor:"pointer",lineHeight:1}}>✕</button>
+        </div>
+
+        {jobs.length===0?<div style={{padding:"18px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:13,color:T.text3,lineHeight:1.8}}>请先去“岗位管理”创建至少一个岗位，再上传简历。系统需要结合岗位要求做自动筛选。</div>
+        :<>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+            <div>
+              <label style={lbSt(T)}>投递岗位 *</label>
+              <select value={jobId} onChange={e=>setJobId(e.target.value)} style={{...inSt(T)}}>
+                {jobs.map(job=><option key={job.id} value={job.id}>{job.title}{job.department?` · ${job.department}`:""}</option>)}
+              </select>
+            </div>
+            <Inp T={T} label="候选人姓名（可选）" placeholder="留空则尝试从简历识别" value={name} onChange={e=>setName(e.target.value)}/>
+          </div>
+
+          <div style={{padding:"14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:T.text}}>上传简历文件</div>
+                <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx) 与纯文本简历</div>
+              </div>
+              <button onClick={()=>!loading&&document.getElementById("candidate-resume-import-input")?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>选择简历文件</button>
+            </div>
+            <div
+              onDragOver={e=>{e.preventDefault();setDrag(true);}}
+              onDragLeave={()=>setDrag(false)}
+              onDrop={e=>{e.preventDefault();setDrag(false);queueResumeFile(e.dataTransfer.files?.[0]);}}
+              onClick={()=>!loading&&document.getElementById("candidate-resume-import-input")?.click()}
+              style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:12,padding:"20px 16px",textAlign:"center",cursor:loading?"default":"pointer",background:drag?`${T.accent}10`:T.inputBg,transition:"all 0.15s"}}>
+              <input id="candidate-resume-import-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}} onChange={e=>{queueResumeFile(e.target.files?.[0]);e.target.value="";}}/>
+              {loading
+                ?<div><Spin text="正在识别并创建候选人..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>会先抽取简历文字，再结合岗位完成自动筛选</div></div>
+                :resumeFileName
+                  ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{resumeFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>确认后将自动创建候选人并生成初筛结果</div></div>
+                  :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入简历文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合批量收到简历后，直接在候选人库里录入</div></div>
+              }
+            </div>
+          </div>
+
+          {selectedJob&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,marginBottom:12}}>
+            当前会按岗位 <strong style={{color:T.text}}>{selectedJob.title}</strong> 的要求和学习规则做初筛。
+          </div>}
+          {err&&<ErrBox>{err}</ErrBox>}
+          {info&&<div style={{fontSize:12,color:"#166534",marginBottom:10,padding:"10px 12px",background:"#dcfce7",borderRadius:8}}>{info}</div>}
+
+          <div style={{display:"flex",justifyContent:"flex-end",gap:10}}>
+            <button onClick={onClose} style={{padding:"8px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:8,color:T.text3,cursor:"pointer",fontSize:12}}>取消</button>
+            <button onClick={submit} disabled={loading||!resumeFile||!selectedJob} style={{padding:"9px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:loading||!resumeFile||!selectedJob?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:loading||!resumeFile||!selectedJob?0.45:1}}>
+              {loading?"处理中...":"上传并创建候选人"}
+            </button>
+          </div>
+        </>}
+      </div>
+    </div>
+  );
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
