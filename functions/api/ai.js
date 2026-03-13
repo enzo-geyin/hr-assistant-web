@@ -27,9 +27,9 @@ const PROVIDERS = {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
     }),
-    body: ({ model, system, user, file }) => ({
+    body: ({ model, system, user, file, maxTokens }) => ({
       model,
-      max_tokens: file ? 1500 : 1200,
+      max_tokens: maxTokens || (file ? 1500 : 1200),
       system,
       messages: [{ role: "user", content: buildClaudeUserContent(user, file) }],
     }),
@@ -46,9 +46,9 @@ const PROVIDERS = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     }),
-    body: ({ model, system, user }) => ({
+    body: ({ model, system, user, maxTokens }) => ({
       model,
-      max_tokens: 1200,
+      max_tokens: maxTokens || 1200,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -67,9 +67,9 @@ const PROVIDERS = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     }),
-    body: ({ model, system, user }) => ({
+    body: ({ model, system, user, maxTokens }) => ({
       model,
-      max_tokens: 1200,
+      max_tokens: maxTokens || 1200,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
@@ -89,9 +89,9 @@ const PROVIDERS = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     }),
-    body: ({ model, system, user }) => ({
+    body: ({ model, system, user, maxTokens }) => ({
       model,
-      max_tokens: 1200,
+      max_tokens: maxTokens || 1200,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -181,7 +181,7 @@ async function handleRequest(request, env) {
   const payload = await request.json().catch(() => null);
   if (!payload) return json({ error: "请求体不是合法 JSON" }, 400);
 
-  const { provider = "claude", model, system = "", user = "", file = null } = payload;
+  const { provider = "claude", model, system = "", user = "", file = null, maxTokens } = payload;
   const prov = PROVIDERS[provider];
   if (!prov) return json({ error: `不支持的 provider: ${provider}` }, 400);
   if (!model) return json({ error: "缺少 model" }, 400);
@@ -201,7 +201,7 @@ async function handleRequest(request, env) {
     upstream = await fetch(prov.endpoint, {
       method: "POST",
       headers: prov.headers(apiKey),
-      body: JSON.stringify(prov.body({ model, system, user, file })),
+      body: JSON.stringify(prov.body({ model, system, user, file, maxTokens: Math.max(600, Math.min(Number(maxTokens) || 1200, 3200)) })),
     });
   } catch (error) {
     return json({ error: error?.message || "构建上游请求失败" }, 400);

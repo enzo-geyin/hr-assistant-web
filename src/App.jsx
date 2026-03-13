@@ -6,6 +6,8 @@ const load = (k,d)=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v)
 const save = (k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 const ENV_PROXY_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_URL?import.meta.env.VITE_HR_PROXY_URL:"/api/ai";
 const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_TOKEN?import.meta.env.VITE_HR_PROXY_TOKEN:"";
+const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
+const CLOUD_SCHEMA_VERSION = 1;
 
 const DEFAULT_CFG = {
   mode:"proxy",
@@ -21,6 +23,63 @@ const normalizeCfg = cfg => ({
   ...(cfg||{}),
   apiKeys:{...DEFAULT_CFG.apiKeys,...(cfg?.apiKeys||{})},
 });
+
+const buildCloudHeaders = token => {
+  const headers = {};
+  if (token?.trim()) headers.Authorization = `Bearer ${token.trim()}`;
+  return headers;
+};
+
+const pickCloudCfg = cfg => ({
+  mode: cfg?.mode || DEFAULT_CFG.mode,
+  provider: cfg?.provider || DEFAULT_CFG.provider,
+  model: cfg?.model || DEFAULT_CFG.model,
+  theme: cfg?.theme || DEFAULT_CFG.theme,
+  proxyUrl: cfg?.proxyUrl || DEFAULT_CFG.proxyUrl,
+});
+
+const buildCloudSnapshot = (cfg, jobs, cands, usageLogs) => ({
+  schemaVersion: CLOUD_SCHEMA_VERSION,
+  cfg: pickCloudCfg(cfg),
+  jobs: Array.isArray(jobs) ? jobs : [],
+  cands: Array.isArray(cands) ? cands : [],
+  usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
+});
+
+const normalizeCloudState = payload => {
+  const state = payload && typeof payload === "object" && "state" in payload ? payload.state : payload;
+  return {
+    cfg: state?.cfg && typeof state.cfg === "object" ? state.cfg : {},
+    jobs: Array.isArray(state?.jobs) ? state.jobs : [],
+    cands: Array.isArray(state?.cands) ? state.cands : [],
+    usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
+    updatedAt: state?.updatedAt || payload?.updatedAt || "",
+  };
+};
+
+const fmtCloudTime = value => {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString("zh-CN", { hour12: false });
+};
+
+async function fetchCloudState(token = "") {
+  const res = await fetch(ENV_STATE_URL, { headers: buildCloudHeaders(token) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `云端读取失败 ${res.status}`);
+  return data;
+}
+
+async function pushCloudState(token = "", state) {
+  const res = await fetch(ENV_STATE_URL, {
+    method: "PUT",
+    headers: { ...buildCloudHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ state }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `云端保存失败 ${res.status}`);
+  return data;
+}
 
 // ─── PROVIDERS ───────────────────────────────────────────────
 const PROVIDERS = {
@@ -49,15 +108,16 @@ const buildDirCtx = (cands, jobs) => {
   return ctx;
 };
 
-const JOB_PARSE_SYSTEM = "你是资深HR，请从岗位JD中提取招聘信息，严格按JSON格式输出，不含任何markdown标记或额外说明。";
-const JOB_PARSE_PROMPT = `请提取并规范化这份招聘JD，返回 JSON：
-{"title":"职位名称","department":"所属部门","level":"级别/序列","salary":"薪资范围","requirements":"完整的岗位职责和任职要求，尽量保留原文结构","t0":"每行一条硬性必须满足的条件","t1":"每行一条核心评估维度（5-8条）"}
+const JOB_PARSE_SYSTEM = "你是资深HR招聘运营助手，负责从JD文档中拆分所有岗位并结构化整理。必须严格返回JSON，不要输出markdown或解释。";
+const JOB_PARSE_PROMPT = `请识别这份JD文件中的全部岗位，返回 JSON：
+{"jobs":[{"title":"职位名称","department":"所属部门","level":"级别/序列","salary":"薪资范围","summary":"岗位一句话概述","requirements":["规整后的岗位职责/任职要求，6-12条"],"t0":["硬性必须条件，3-8条"],"t1":["核心评估维度，5-8条"]}]}
 要求：
-1. title / requirements 尽量完整，不要留空。
-2. 如果原文没有 department / level / salary，可返回空字符串。
-3. t0 只保留必须满足的硬条件。
-4. t1 提炼成用于评估候选人的核心能力维度。
-5. t0 和 t1 用换行符分隔多条内容。`;
+1. 文档里有几个岗位，就返回几个 jobs 对象，不要把多个岗位合并成一个。
+2. title 必须简短明确，只保留岗位名，不要带大段描述。
+3. requirements 要去重、去广告词、去排版噪音，整理成清晰条目。
+4. t0 只保留必须满足的硬门槛，例如年限、学历、证书、工具、行业经验。
+5. t1 只保留评估候选人的核心能力维度，例如目标导向、数据分析、沟通协作。
+6. 缺失字段返回空字符串或空数组。`;
 
 const stripModelNoise = text => String(text || "")
   .replace(/<think>[\s\S]*?<\/think>/gi, "")
@@ -118,6 +178,92 @@ const normalizeExtractedText = text => String(text || "")
   .replace(/[ \t]+\n/g, "\n")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
+
+const normalizeLooseListText = text => normalizeExtractedText(String(text || "")
+  .replace(/([0-9]{1,2}\s*[\.、\)])\s*/g, "\n$1 ")
+  .replace(/[•·●▪◦▸►]/g, "\n")
+  .replace(/岗位职责[:：]/g, "\n岗位职责：")
+  .replace(/任职要求[:：]/g, "\n任职要求：")
+);
+
+const cleanListLine = line => String(line || "")
+  .replace(/^\s*[0-9]{1,2}\s*[\.、\)]\s*/g, "")
+  .replace(/^\s*[-—–*•·●▪◦▸►]+\s*/g, "")
+  .replace(/^\s*[（(]?\s*[一二三四五六七八九十]+\s*[）)]?[、\.\s]*/g, "")
+  .replace(/\s+/g, " ")
+  .trim();
+
+const dedupeLines = lines => {
+  const seen = new Set();
+  return lines.filter(line => {
+    const key = line.toLowerCase();
+    if (!line || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const toLineArray = (value, limit = 12) => {
+  const raw = Array.isArray(value)
+    ? value.flatMap(item => String(item || "").split(/\n+/))
+    : normalizeLooseListText(value).split(/\n+/);
+  return dedupeLines(raw.map(cleanListLine)).slice(0, limit);
+};
+
+const formatRequirementsText = (summary, requirements) => {
+  const blocks = [];
+  if (summary) blocks.push(`岗位概述：${summary}`);
+  if (requirements.length) {
+    blocks.push("岗位职责与任职要求：");
+    requirements.forEach((item, index) => blocks.push(`${index + 1}. ${item}`));
+  }
+  return blocks.join("\n");
+};
+
+const normalizeJobDraft = (job, index = 0) => {
+  const title = cleanListLine(job?.title || "") || `岗位 ${index + 1}`;
+  const department = cleanListLine(job?.department || "");
+  const level = cleanListLine(job?.level || "");
+  const salary = cleanListLine(job?.salary || "");
+  const summary = cleanListLine(job?.summary || "");
+  const requirements = toLineArray(job?.requirements, 12);
+  const t0Lines = toLineArray(job?.t0, 8);
+  const t1Lines = toLineArray(job?.t1, 8);
+  return {
+    title,
+    department,
+    level,
+    salary,
+    summary,
+    requirementsList: requirements,
+    requirements: formatRequirementsText(summary, requirements),
+    t0: t0Lines.join("\n"),
+    t1: t1Lines.join("\n"),
+  };
+};
+
+const normalizeJobParseResult = result => {
+  const rawJobs = Array.isArray(result?.jobs) ? result.jobs : [result];
+  return rawJobs
+    .map((job, index) => normalizeJobDraft(job, index))
+    .filter(job => job.title || job.requirementsList.length || job.t0 || job.t1)
+    .filter(job => job.requirements || job.t0 || job.t1);
+};
+
+const buildScreeningPrompt = (job, resume) => {
+  const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
+  const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
+  return `岗位：${job?.title||"未知"} 部门：${job?.department||""} 要求：${job?.requirements||""}
+${t0?`T0硬性条件：[${t0}]`:"请自行从要求中提取T0硬性条件"}
+${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
+薪酬：${job?.salary||"不限"} 简历：${resume}
+输出JSON：{"candidateName":"候选人姓名（如能识别）","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
+"t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
+"t1":{"items":[{"dimension":"维度","note":"依据","score":4,"maxScore":5}]},
+"t2":{"items":[{"item":"加分项","has":true,"note":"依据"}]},
+"fineScreen":{"education":{"score":3,"maxScore":5,"note":""},"industryRisk":{"score":3,"maxScore":5,"note":""},"tenureMatch":{"score":4,"maxScore":5,"note":""},"salaryReason":{"score":5,"maxScore":5,"note":""}},
+"risks":["风险1"]}`;
+};
 
 const getFileKind = file => {
   const n = String(file?.name || "").toLowerCase();
@@ -222,18 +368,19 @@ const extractFileText = async file => {
 };
 
 // ─── CALL AI ─────────────────────────────────────────────────
-async function callAI(cfg, system, user, onTokens, dirCtx="") {
+async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
   const {mode="proxy",provider="claude", model, apiKeys={}, proxyUrl="", proxyToken=""} = cfg;
   const prov = PROVIDERS[provider]||PROVIDERS.claude;
   const apiKey = apiKeys[provider]||"";
   const fullSys = dirCtx ? `${system}\n\n${dirCtx}` : system;
+  const maxTokens = Math.max(600, Math.min(Number(options?.maxTokens) || 1200, 3200));
   let inputT=0,outputT=0,text="";
   if (mode==="proxy") {
     const url=proxyUrl.trim();
     if(!url) throw new Error("请先在「设置」中填写代理服务地址");
     const headers={"Content-Type":"application/json"};
     if(proxyToken.trim()) headers.Authorization=`Bearer ${proxyToken.trim()}`;
-    const res=await fetch(url,{method:"POST",headers,body:JSON.stringify({provider,model,system:fullSys,user})});
+    const res=await fetch(url,{method:"POST",headers,body:JSON.stringify({provider,model,system:fullSys,user,maxTokens})});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||e.message||`Proxy Error ${res.status}`);}
     const d=await res.json();
     inputT=d.usage?.input||0; outputT=d.usage?.output||0;
@@ -244,11 +391,11 @@ async function callAI(cfg, system, user, onTokens, dirCtx="") {
   }
   if (!apiKey) throw new Error(`请先在「设置」中填写 ${prov.name} 的 API Key`);
   if (provider==="claude") {
-    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model,max_tokens:1200,system:fullSys,messages:[{role:"user",content:user}]})});
+    const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model,max_tokens:maxTokens,system:fullSys,messages:[{role:"user",content:user}]})});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
     const d=await res.json(); inputT=d.usage?.input_tokens||0; outputT=d.usage?.output_tokens||0; text=d.content?.[0]?.text||"";
   } else {
-    const body={model,max_tokens:1200,messages:[{role:"system",content:fullSys},{role:"user",content:user}]};
+    const body={model,max_tokens:maxTokens,messages:[{role:"system",content:fullSys},{role:"user",content:user}]};
     if(provider==="deepseek") body.response_format={type:"json_object"};
     const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},body:JSON.stringify(body)});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
@@ -267,7 +414,9 @@ async function callAIWithJobFile(cfg, file, onTokens) {
     cfg,
     JOB_PARSE_SYSTEM,
     `${JOB_PARSE_PROMPT}\n\n【文件名】${file.name}\n【识别文字】\n${raw.slice(0,30000)}`,
-    onTokens
+    onTokens,
+    "",
+    {maxTokens:2400}
   );
 }
 
@@ -307,11 +456,60 @@ export default function App() {
   const [candTab,setCandTab]=useState("screening");
   const [compared,setCompared]=useState([]);
   const [showCompare,setShowCompare]=useState(false);
+  const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
+  const [cloudHydrated,setCloudHydrated]=useState(false);
 
   useEffect(()=>save("hr_cfg",cfg),[cfg]);
   useEffect(()=>save("hr_jobs",jobs),[jobs]);
   useEffect(()=>save("hr_cands",cands),[cands]);
   useEffect(()=>save("hr_usage",usageLogs),[usageLogs]);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const hydrateFromCloud=async()=>{
+      setCloudHydrated(false);
+      setCloud(prev=>({...prev,phase:"loading",message:"正在连接云端数据库..."}));
+      try{
+        const payload=await fetchCloudState(cfg.proxyToken||"");
+        if(cancelled) return;
+        const remote=normalizeCloudState(payload);
+        const hasRemoteData=remote.jobs.length>0||remote.cands.length>0||remote.usageLogs.length>0||Object.keys(remote.cfg).length>0;
+        if(hasRemoteData){
+          setJobs(remote.jobs);
+          setCands(remote.cands);
+          setUsageLogs(remote.usageLogs);
+          setCfg(prev=>normalizeCfg({...prev,...remote.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken}));
+          setCloud({phase:"ready",message:"已从云端数据库载入数据",updatedAt:payload.updatedAt||remote.updatedAt||""});
+        }else{
+          setCloud({phase:"ready",message:"云端数据库为空，将自动上传当前浏览器数据",updatedAt:payload.updatedAt||remote.updatedAt||""});
+        }
+      }catch(error){
+        if(cancelled) return;
+        setCloud(prev=>({phase:"error",message:error?.message||"云端数据库不可用，当前继续使用本地缓存",updatedAt:prev.updatedAt||""}));
+      }finally{
+        if(!cancelled) setCloudHydrated(true);
+      }
+    };
+    hydrateFromCloud();
+    return()=>{cancelled=true;};
+  },[cfg.proxyToken]);
+
+  useEffect(()=>{
+    if(!cloudHydrated) return;
+    let cancelled=false;
+    const timer=setTimeout(async()=>{
+      try{
+        setCloud(prev=>({...prev,phase:"syncing",message:"正在同步到云端数据库..."}));
+        const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs));
+        if(cancelled) return;
+        setCloud({phase:"ready",message:"云端数据库已同步",updatedAt:payload.updatedAt||""});
+      }catch(error){
+        if(cancelled) return;
+        setCloud(prev=>({phase:"error",message:error?.message||"云端同步失败，当前数据仍保存在本地浏览器",updatedAt:prev.updatedAt||""}));
+      }
+    },700);
+    return()=>{cancelled=true;clearTimeout(timer);};
+  },[cloudHydrated,cfg.mode,cfg.provider,cfg.model,cfg.theme,cfg.proxyUrl,cfg.proxyToken,jobs,cands,usageLogs]);
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
@@ -398,7 +596,7 @@ export default function App() {
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} upcoming={upcoming} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
-        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs}/>}
+        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
     </div>
   );
@@ -637,29 +835,40 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
   const [jdLoading,setJdLoading]=useState(false);
   const [jdErr,setJdErr]=useState("");
   const [jdDrag,setJdDrag]=useState(false);
+  const [parsedJobs,setParsedJobs]=useState([]);
+  const [activeParsedJob,setActiveParsedJob]=useState(0);
   const ff=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
+
+  const applyParsedJobToForm=job=>{
+    if(!job) return;
+    setForm({
+      title:job.title||"",
+      department:job.department||"",
+      level:job.level||"",
+      salary:job.salary||"",
+      requirements:job.requirements||"",
+      t0:job.t0||"",
+      t1:job.t1||"",
+    });
+  };
 
   const parseJD=async(file)=>{
     setJdFile(file);setJdErr("");setJdLoading(true);
     try{
       const res=await callAIWithJobFile(cfg,file,recordTokens);
       if(res.error) throw new Error(res.raw||res.error);
-      setForm(p=>({
-        ...p,
-        title:res.title||p.title||"",
-        department:res.department||p.department||"",
-        level:res.level||p.level||"",
-        salary:res.salary||p.salary||"",
-        requirements:res.requirements||p.requirements||"",
-        t0:res.t0||p.t0||"",
-        t1:res.t1||p.t1||"",
-      }));
+      const jobsFound=normalizeJobParseResult(res);
+      if(!jobsFound.length) throw new Error("没有识别到清晰岗位，请尝试更清晰的文件或分开上传");
+      setParsedJobs(jobsFound);
+      setActiveParsedJob(0);
+      applyParsedJobToForm(jobsFound[0]);
     }catch(e){setJdErr(e.message);}
     setJdLoading(false);
   };
 
   const resetCreateForm=()=>{
     setOpen(false);setJdFile(null);setJdErr("");setJdDrag(false);setJdLoading(false);
+    setParsedJobs([]);setActiveParsedJob(0);
     setForm({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
   };
 
@@ -673,6 +882,13 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
   const delJob=id=>{if(window.confirm("确认删除该岗位及所有候选人？")){setJobs(p=>p.filter(j=>j.id!==id));setCands(p=>p.filter(c=>c.jobId!==id));if(selJob===id)setSelJob(null);}};
   const job=jobs.find(j=>j.id===selJob);
   const jobCands=cands.filter(c=>c.jobId===selJob);
+  const importParsedJobs=()=>{
+    if(!parsedJobs.length) return;
+    const created=parsedJobs.map(job=>({...job,id:Date.now()+Math.floor(Math.random()*1000000)}));
+    setJobs(p=>[...p,...created]);
+    setSelJob(created[0]?.id||null);
+    resetCreateForm();
+  };
   const addCand=()=>{
     const id=Date.now();
     setCands(p=>[...p,{id,jobId:selJob,name:"",status:"pending",resume:"",screening:null,questions:null,interviews:[],scheduledAt:null,interviewRound:null,directorVerdict:null}]);
@@ -710,8 +926,46 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
               }
             </div>
             {jdErr&&<div style={{fontSize:11,color:"#dc2626",marginTop:8}}>{jdErr}</div>}
-            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>文件会先提取成文字，再交给当前模型做岗位结构化解析。</div>}
+            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>文件会先提取成文字，再交给当前模型做多岗位结构化解析与规整。</div>}
           </div>
+          {parsedJobs.length>0&&<div style={{marginBottom:12,padding:"12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,color:T.text}}>已识别 {parsedJobs.length} 个岗位</div>
+                <div style={{fontSize:11,color:T.text4,marginTop:3}}>先看规整结果，再选择填入当前表单或批量导入</div>
+              </div>
+              {parsedJobs.length>1&&<button onClick={importParsedJobs}
+                style={{padding:"7px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>
+                批量导入 {parsedJobs.length} 个岗位
+              </button>}
+            </div>
+            <div style={{display:"grid",gap:9}}>
+              {parsedJobs.map((job,index)=>(
+                <div key={`${job.title}-${index}`} style={{padding:"10px 12px",background:index===activeParsedJob?`${T.accent}10`:T.card2,border:`1px solid ${index===activeParsedJob?T.accent:T.border}`,borderRadius:9}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:T.text}}>{job.title}</div>
+                      <div style={{fontSize:11,color:T.text4,marginTop:3}}>{[job.department,job.level,job.salary].filter(Boolean).join(" · ")||"未补全字段"}</div>
+                    </div>
+                    <button onClick={()=>{setActiveParsedJob(index);applyParsedJobToForm(job);}}
+                      style={{padding:"5px 10px",background:index===activeParsedJob?T.accent:"transparent",color:index===activeParsedJob?T.accentFg:T.text3,border:`1px solid ${index===activeParsedJob?T.accent:T.border2}`,borderRadius:7,cursor:"pointer",fontSize:12,flexShrink:0}}>
+                      {index===activeParsedJob?"当前填入":"填入表单"}
+                    </button>
+                  </div>
+                  {job.summary&&<div style={{fontSize:12,color:T.text3,marginTop:8,lineHeight:1.6}}>{job.summary}</div>}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+                    <Chip c={T.text3} bg={T.navActive}>要求 {job.requirementsList.length} 条</Chip>
+                    <Chip c="#92400e" bg="#fef3c7">T0 {job.t0?job.t0.split("\n").filter(Boolean).length:0} 条</Chip>
+                    <Chip c="#1d4ed8" bg="#dbeafe">T1 {job.t1?job.t1.split("\n").filter(Boolean).length:0} 条</Chip>
+                  </div>
+                  {job.requirementsList.length>0&&<div style={{marginTop:8,fontSize:11,color:T.text4,lineHeight:1.7}}>
+                    {job.requirementsList.slice(0,4).map((item,i)=><div key={i}>• {item}</div>)}
+                    {job.requirementsList.length>4&&<div>… 还有 {job.requirementsList.length-4} 条</div>}
+                  </div>}
+                </div>
+              ))}
+            </div>
+          </div>}
           {[["职位名称 *","title","短视频剪辑师"],["所属部门","department","AI MCN"],["级别","level","mid"],["薪酬","salary","15-25K"]].map(([l,k,ph])=>(
             <Inp key={k} T={T} label={l} placeholder={ph} value={form[k]} onChange={ff(k)}/>
           ))}
@@ -858,44 +1112,120 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
 function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
   const [name,setName]=useState(cand.name||"");
   const [resume,setResume]=useState(cand.resume||"");
+  const [inputMode,setInputMode]=useState(cand.resumeFileName?"file":"text");
+  const [resumeFile,setResumeFile]=useState(null);
+  const [resumeFileName,setResumeFileName]=useState(cand.resumeFileName||"");
+  const [drag,setDrag]=useState(false);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
-  const analyze=async()=>{
-    if(!resume.trim()){setErr("请粘贴简历内容");return;}
-    setErr("");setLoading(true);
-    updCand(cand.id,{name:name||cand.name,resume});
+
+  const queueResumeFile=file=>{
+    if(!file) return;
+    if(getFileKind(file)==="unknown"){setErr("仅支持 PDF、图片、Word(.docx) 或纯文本简历文件");return;}
+    setResumeFile(file);
+    setResumeFileName(file.name);
+    setInputMode("file");
+    setErr("");
+  };
+
+  const analyzeExtractedResume=async(extractedResume, sourceName="")=>{
+    const normalizedResume=normalizeExtractedText(extractedResume).slice(0,30000);
+    const nextResumeFileName=sourceName ?? cand.resumeFileName ?? "";
+    if(!normalizedResume) throw new Error("未能从简历文件中提取到有效文字，请换一个更清晰的文件");
+    setResume(normalizedResume);
+    setResumeFileName(nextResumeFileName);
+    updCand(cand.id,{name:name||cand.name,resume:normalizedResume,resumeFileName:nextResumeFileName});
     try{
-      const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
-      const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
       const res=await callAI(cfg,
         `你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。`,
-        `岗位：${job?.title||"未知"} 部门：${job?.department||""} 要求：${job?.requirements||""}
-${t0?`T0硬性条件：[${t0}]`:"请自行从要求中提取T0硬性条件"}
-${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
-薪酬：${job?.salary||"不限"} 简历：${resume}
-输出JSON：{"summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
-"t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
-"t1":{"items":[{"dimension":"维度","note":"依据","score":4,"maxScore":5}]},
-"t2":{"items":[{"item":"加分项","has":true,"note":"依据"}]},
-"fineScreen":{"education":{"score":3,"maxScore":5,"note":""},"industryRisk":{"score":3,"maxScore":5,"note":""},"tenureMatch":{"score":4,"maxScore":5,"note":""},"salaryReason":{"score":5,"maxScore":5,"note":""}},
-"risks":["风险1"]}`,
-        recordTokens,dirCtx
+        buildScreeningPrompt(job, normalizedResume),
+        recordTokens,dirCtx,
+        {maxTokens:2200}
       );
-      if(res.error) throw new Error(res.error);
-      updCand(cand.id,{screening:res,status:res.recommendation==="建议通过"?"screening":res.recommendation==="待定"?"watching":"rejected"});
-    }catch(e){setErr(e.message);}
+      if(res.error) throw new Error(res.raw||res.error);
+      const candName=res.candidateName||name||cand.name||"";
+      if(candName&&!name) setName(candName);
+      updCand(cand.id,{
+        name:candName,
+        resume:normalizedResume,
+        resumeFileName:nextResumeFileName,
+        screening:res,
+        status:res.recommendation==="建议通过"?"screening":res.recommendation==="待定"?"watching":"rejected"
+      });
+    }catch(e){throw e;}
+  };
+
+  const analyzeText=async()=>{
+    if(!resume.trim()){setErr("请粘贴简历内容");return;}
+    setErr("");setLoading(true);
+    try{await analyzeExtractedResume(resume,"");}
+    catch(e){setErr(e.message);}
     setLoading(false);
   };
+
+  const analyzeFile=async()=>{
+    if(resumeFile){
+      setErr("");setLoading(true);
+      try{
+        const extractedResume = await extractFileText(resumeFile);
+        await analyzeExtractedResume(extractedResume,resumeFile.name);
+      }catch(e){setErr(e.message);}
+      setLoading(false);
+      return;
+    }
+    if(resume.trim() && resumeFileName){
+      setErr("");setLoading(true);
+      try{await analyzeExtractedResume(resume,resumeFileName);}
+      catch(e){setErr(e.message);}
+      setLoading(false);
+      return;
+    }
+    setErr("请先上传简历文件");
+  };
+
   const scr=cand.screening;
   return(<div>
     {!scr&&(<SCard T={T} title="输入候选人信息">
       <Inp T={T} label="候选人姓名" placeholder="姓名（可选）" value={name} onChange={e=>setName(e.target.value)}/>
-      <div style={{marginBottom:12}}><label style={lbSt(T)}>粘贴简历内容 *</label>
-        <textarea rows={12} value={resume} onChange={e=>setResume(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.6}} placeholder={"将简历文字粘贴到此处...\n包括：基本信息、教育背景、工作经历、技能特长等"}/>
+      <div style={{display:"flex",gap:0,marginBottom:12,border:`1px solid ${T.border2}`,borderRadius:8,overflow:"hidden",width:"fit-content"}}>
+        {[["file","📄 上传简历文件"],["text","✏️ 粘贴文字"]].map(([mode,label])=>(
+          <button key={mode} onClick={()=>setInputMode(mode)}
+            style={{padding:"7px 16px",border:"none",background:inputMode===mode?T.accent:T.inputBg,color:inputMode===mode?T.accentFg:T.text3,cursor:"pointer",fontSize:12,fontWeight:inputMode===mode?700:400}}>
+            {label}
+          </button>
+        ))}
       </div>
+      {inputMode==="file"&&<div style={{marginBottom:12,padding:"12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+          <label style={{...lbSt(T),marginBottom:0}}>上传简历文件（AI 自动识别并规整）</label>
+          <button onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
+            style={{padding:"7px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:loading?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:loading?0.5:1}}>
+            上传简历文件
+          </button>
+        </div>
+        <div
+          onDragOver={e=>{e.preventDefault();setDrag(true);}}
+          onDragLeave={()=>setDrag(false)}
+          onDrop={e=>{e.preventDefault();setDrag(false);queueResumeFile(e.dataTransfer.files?.[0]);}}
+          onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
+          style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:10,padding:"16px 14px",textAlign:"center",cursor:loading?"default":"pointer",background:drag?`${T.accent}10`:T.inputBg,transition:"all 0.15s"}}>
+          <input id={`resume-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}}
+            onChange={e=>{queueResumeFile(e.target.files?.[0]);e.target.value="";}}/>
+          {loading
+            ?<div><Spin text="正在识别并规整简历..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>会先抽取文字，再按岗位要求做智能筛选</div></div>
+            :resumeFileName
+              ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{resumeFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>可直接开始筛选，或重新上传替换文件</div></div>
+              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入简历文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>支持 PDF、图片、Word(.docx) 和纯文本简历</div></div>
+          }
+        </div>
+      </div>}
+      {inputMode==="text"&&<div style={{marginBottom:12}}><label style={lbSt(T)}>粘贴简历内容 *</label>
+        <textarea rows={12} value={resume} onChange={e=>setResume(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.6}} placeholder={"将简历文字粘贴到此处...\n包括：基本信息、教育背景、工作经历、技能特长等"}/>
+      </div>}
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入你的历史判断标准，AI评估将更贴近你的用人偏好</div>}
       {err&&<ErrBox>{err}</ErrBox>}
-      <BtnPrimary T={T} loading={loading} disabled={loading||!resume.trim()} onClick={analyze}>{loading?<Spin text="AI 正在分析简历..."/>:"AI 智能筛选 →"}</BtnPrimary>
+      {inputMode==="file"&&<BtnPrimary T={T} loading={loading} disabled={loading||(!resumeFile&&!resumeFileName)} onClick={analyzeFile}>{loading?<Spin text="AI 正在分析简历文件..."/>:"识别并智能筛选 →"}</BtnPrimary>}
+      {inputMode==="text"&&<BtnPrimary T={T} loading={loading} disabled={loading||!resume.trim()} onClick={analyzeText}>{loading?<Spin text="AI 正在分析简历..."/>:"AI 智能筛选 →"}</BtnPrimary>}
     </SCard>)}
     {scr&&(<div>
       <div style={{...cardSt(T),borderLeft:`4px solid ${recSt(scr.recommendation).c}`,marginBottom:14}}>
@@ -932,7 +1262,13 @@ ${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
         <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:7}}>▲ 风险提示</div>
         {scr.risks.map((r,i)=><div key={i} style={{fontSize:13,color:"#78350f",padding:"2px 0"}}>• {r}</div>)}
       </div>}
-      <button onClick={()=>updCand(cand.id,{screening:null,questions:null})} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新筛选</button>
+      <button onClick={()=>{
+        setErr("");
+        setResumeFile(null);
+        setResumeFileName(cand.resumeFileName||"");
+        setInputMode(cand.resumeFileName?"file":"text");
+        updCand(cand.id,{screening:null,questions:null});
+      }} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新筛选</button>
     </div>)}
   </div>);
 }
@@ -1232,11 +1568,13 @@ function ResultTab({T,cand}) {
 }
 
 // ─── SETTINGS VIEW ───────────────────────────────────────────
-function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs}) {
+function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud}) {
   const [keys,setKeys]=useState(cfg.apiKeys||{});
   const [saved,setSaved]=useState("");
   const saveKey=pid=>{setCfg(p=>({...p,apiKeys:{...p.apiKeys,[pid]:keys[pid]}}));setSaved(pid);setTimeout(()=>setSaved(""),1500);};
   const usingProxy=cfg.mode!=="direct";
+  const cloudTone=cloud?.phase==="ready"?{c:"#059669",bg:"#ecfdf5"}:cloud?.phase==="syncing"||cloud?.phase==="loading"?{c:"#2563eb",bg:"#eff6ff"}:{c:"#dc2626",bg:"#fef2f2"};
+  const cloudLabel=cloud?.phase==="ready"?"已连接 D1":cloud?.phase==="syncing"?"同步中":cloud?.phase==="loading"?"连接中":"云端异常";
 
   const accuracy=dirDone.map(c=>{
     const aiRec=c.screening?.recommendation||"";
@@ -1274,6 +1612,23 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs}) {
             当前为代理模式：前端只发送 `provider / model / prompt` 到你的服务端，真正的模型 API Key 保存在服务端环境变量里。
           </div>
         </>}
+      </div>
+
+      <SecLabel T={T}>云端数据库</SecLabel>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:22}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:T.text}}>Cloudflare D1 同步状态</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:4}}>岗位、候选人、面试记录和调用统计会自动同步到云端，同时保留浏览器本地缓存兜底。</div>
+          </div>
+          <Chip c={cloudTone.c} bg={cloudTone.bg}>{cloudLabel}</Chip>
+        </div>
+        <div style={{fontSize:12,color:T.text2,lineHeight:1.8,padding:"10px 12px",background:T.card2,borderRadius:8,border:`1px solid ${T.border}`}}>
+          <div>{cloud?.message||"等待云端同步状态..."}</div>
+          {cloud?.updatedAt&&<div style={{marginTop:6,color:T.text4}}>最近成功同步：{fmtCloudTime(cloud.updatedAt)}</div>}
+          <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 里的数据；但如果你清浏览器缓存，只会丢本地副本，不会影响云端主数据。</div>
+          <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。当前同步采用整库快照，多人同时改动时以后保存的内容会覆盖之前的保存。</div>
+        </div>
       </div>
 
       <SecLabel T={T}>AI 模型配置</SecLabel>
