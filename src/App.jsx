@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 // ─── PERSIST ─────────────────────────────────────────────────
 const load = (k,d)=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}};
@@ -64,6 +65,13 @@ const parseJsonResponse = text => {
   catch{return{error:"JSON解析失败",raw:text};}
 };
 
+const OCR_LANG = "chi_sim+eng";
+const normalizeExtractedText = text => String(text || "")
+  .replace(/\u0000/g, " ")
+  .replace(/[ \t]+\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim();
+
 const getFileKind = file => {
   const n = String(file?.name || "").toLowerCase();
   const type = String(file?.type || "").toLowerCase();
@@ -74,16 +82,33 @@ const getFileKind = file => {
   return "unknown";
 };
 
-const readFileAsBase64 = file => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = e => {
-    const result = String(e.target?.result || "");
-    const b64 = result.includes(",") ? result.split(",")[1] : "";
-    resolve({data:b64,mediaType:file.type || "application/octet-stream",name:file.name});
-  };
-  reader.onerror = () => reject(new Error(`读取文件失败：${file.name}`));
-  reader.readAsDataURL(file);
-});
+let pdfJsPromise;
+const loadPdfJs = async () => {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import("pdfjs-dist/legacy/build/pdf.mjs").then(mod => {
+      mod.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      return mod;
+    });
+  }
+  return pdfJsPromise;
+};
+
+const resolveRecognize = mod => {
+  const candidates = [mod?.recognize, mod?.default?.recognize, mod?.default];
+  return candidates.find(candidate => typeof candidate === "function") || null;
+};
+
+const ocrSource = async (source, label) => {
+  const mod = await import("tesseract.js");
+  const recognize = resolveRecognize(mod);
+  if (!recognize) throw new Error("OCR 组件加载失败，请稍后重试");
+  const result = await recognize(source, OCR_LANG, {
+    logger: () => {},
+  });
+  const text = normalizeExtractedText(result?.data?.text || "");
+  if (!text) throw new Error(`${label} 未识别出有效文字，请换更清晰的文件`);
+  return text;
+};
 
 const resolveMammoth = mod => {
   const candidates = [mod, mod?.default, mod?.mammoth, mod?.default?.mammoth, globalThis?.mammoth];
@@ -95,7 +120,58 @@ const extractDocxText = async file => {
   const mammoth = resolveMammoth(mod);
   if (!mammoth) throw new Error("Word 解析组件加载失败，请改用 PDF、图片或纯文本 JD");
   const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-  return String(result?.value || "").trim();
+  return normalizeExtractedText(result?.value || "");
+};
+
+const extractImageText = async file => {
+  return ocrSource(file, "图片");
+};
+
+const renderPdfPageToCanvas = async (page, scale = 1.8) => {
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: false });
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  await page.render({ canvasContext: context, viewport }).promise;
+  return canvas;
+};
+
+const extractPdfText = async file => {
+  const pdfjsLib = await loadPdfJs();
+  const data = new Uint8Array(await file.arrayBuffer());
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const pageText = normalizeExtractedText(
+      textContent.items.map(item => ("str" in item ? item.str : "")).join(" ")
+    );
+    if (pageText) pageTexts.push(`【第${pageNumber}页】\n${pageText}`);
+  }
+
+  const extractedText = pageTexts.join("\n\n").trim();
+  if (extractedText.length >= 80) return extractedText;
+
+  const ocrTexts = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const canvas = await renderPdfPageToCanvas(page);
+    const pageText = await ocrSource(canvas, `PDF 第${pageNumber}页`);
+    if (pageText) ocrTexts.push(`【第${pageNumber}页】\n${pageText}`);
+  }
+  return normalizeExtractedText(ocrTexts.join("\n\n"));
+};
+
+const extractFileText = async file => {
+  const kind = getFileKind(file);
+  if (kind==="text") return normalizeExtractedText(await file.text());
+  if (kind==="docx") return extractDocxText(file);
+  if (kind==="pdf") return extractPdfText(file);
+  if (kind==="image") return extractImageText(file);
+  throw new Error("暂不支持该文件格式");
 };
 
 // ─── CALL AI ─────────────────────────────────────────────────
@@ -136,66 +212,14 @@ async function callAI(cfg, system, user, onTokens, dirCtx="") {
 async function callAIWithJobFile(cfg, file, onTokens) {
   const kind = getFileKind(file);
   if (kind==="unknown") throw new Error("仅支持 PDF、图片、Word(.docx) 或纯文本 JD 文件");
-
-  if (kind==="text") {
-    const raw = String(await file.text()).trim();
-    if(!raw) throw new Error("JD 文件内容为空，请换一个文件重试");
-    return callAI(cfg, JOB_PARSE_SYSTEM, `${JOB_PARSE_PROMPT}\n\n【JD内容】\n${raw.slice(0,30000)}`, onTokens);
-  }
-
-  if (kind==="docx") {
-    const raw = await extractDocxText(file);
-    if(!raw) throw new Error("未能从 Word JD 中提取到文字，请换成 PDF 或手动粘贴");
-    return callAI(cfg, JOB_PARSE_SYSTEM, `${JOB_PARSE_PROMPT}\n\n【JD内容】\n${raw.slice(0,30000)}`, onTokens);
-  }
-
-  const {mode="proxy",provider="claude",model,apiKeys={},proxyUrl="",proxyToken=""} = cfg;
-  const prov = PROVIDERS[provider] || PROVIDERS.claude;
-  const fullPrompt = `${JOB_PARSE_PROMPT}\n\n请结合上传的 JD 文件内容完成提取。`;
-  const fileB64 = await readFileAsBase64(file);
-
-  if (mode==="proxy") {
-    const url=proxyUrl.trim();
-    if(!url) throw new Error("请先在「设置」中填写代理服务地址");
-    if(provider!=="claude") throw new Error("当前代理模式下，PDF/图片 JD 识别请先切换到 Claude 模型");
-    const headers={"Content-Type":"application/json"};
-    if(proxyToken.trim()) headers.Authorization=`Bearer ${proxyToken.trim()}`;
-    const res=await fetch(url,{method:"POST",headers,body:JSON.stringify({
-      provider,
-      model,
-      system:JOB_PARSE_SYSTEM,
-      user:fullPrompt,
-      file:{name:fileB64.name,mediaType:kind==="pdf"?"application/pdf":fileB64.mediaType,data:fileB64.data}
-    })});
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||e.message||`Proxy Error ${res.status}`);}
-    const d=await res.json();
-    if(onTokens) onTokens(d.usage?.input||0,d.usage?.output||0,provider);
-    if(d?.data && typeof d.data==="object") return d.data;
-    return parseJsonResponse(typeof d?.data==="string"?d.data:"");
-  }
-
-  const apiKey = apiKeys[provider] || "";
-  if (!apiKey) throw new Error(`请先在「设置」中填写 ${prov.name} 的 API Key`);
-  if (provider!=="claude") throw new Error("浏览器直连模式下，当前仅支持 Claude 识别 PDF/图片 JD");
-
-  const fileBlock = kind==="pdf"
-    ? {type:"document",source:{type:"base64",media_type:"application/pdf",data:fileB64.data}}
-    : {type:"image",source:{type:"base64",media_type:fileB64.mediaType,data:fileB64.data}};
-  const res=await fetch(prov.endpoint,{method:"POST",headers:{
-    "Content-Type":"application/json",
-    "x-api-key":apiKey,
-    "anthropic-version":"2023-06-01",
-    "anthropic-dangerous-direct-browser-access":"true"
-  },body:JSON.stringify({
-    model,
-    max_tokens:1500,
-    system:JOB_PARSE_SYSTEM,
-    messages:[{role:"user",content:[fileBlock,{type:"text",text:fullPrompt}]}]
-  })});
-  if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
-  const d=await res.json();
-  if(onTokens) onTokens(d.usage?.input_tokens||0,d.usage?.output_tokens||0,provider);
-  return parseJsonResponse(d.content?.[0]?.text||"");
+  const raw = await extractFileText(file);
+  if(!raw) throw new Error("未能从文件中提取到文字，请换一个更清晰的文件重试");
+  return callAI(
+    cfg,
+    JOB_PARSE_SYSTEM,
+    `${JOB_PARSE_PROMPT}\n\n【文件名】${file.name}\n【识别文字】\n${raw.slice(0,30000)}`,
+    onTokens
+  );
 }
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -637,7 +661,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
               }
             </div>
             {jdErr&&<div style={{fontSize:11,color:"#dc2626",marginTop:8}}>{jdErr}</div>}
-            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>AI 已自动提取岗位信息，可继续补充或修正后保存。</div>}
+            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>文件会先提取成文字，再交给当前模型做岗位结构化解析。</div>}
           </div>
           {[["职位名称 *","title","短视频剪辑师"],["所属部门","department","AI MCN"],["级别","level","mid"],["薪酬","salary","15-25K"]].map(([l,k,ph])=>(
             <Inp key={k} T={T} label={l} placeholder={ph} value={form[k]} onChange={ff(k)}/>
