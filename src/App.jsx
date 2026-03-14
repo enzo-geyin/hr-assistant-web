@@ -687,6 +687,8 @@ const fmt=n=>n?.toLocaleString()||"0";
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const isSoon=s=>{if(!s)return false;const d=(new Date(s)-new Date())/86400000;return d>=-0.1&&d<=7;};
 const fmtDate=s=>{if(!s)return "";const d=new Date(s);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
+const EMPTY_JOB_FORM=()=>({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
+const EMPTY_JOB_COMPOSER=()=>({open:false,form:EMPTY_JOB_FORM(),jdFileName:"",jdLoading:false,jdErr:"",parsedJobs:[],activeParsedJob:0,taskId:null});
 
 // ─── APP ROOT ────────────────────────────────────────────────
 export default function App() {
@@ -694,6 +696,7 @@ export default function App() {
   const [jobs,setJobs] =useState(()=>load("hr_jobs",[]));
   const [cands,setCands]=useState(()=>load("hr_cands",[]));
   const [usageLogs,setUsageLogs]=useState(()=>load("hr_usage",[]));
+  const [jobComposer,setJobComposer]=useState(EMPTY_JOB_COMPOSER);
   const [view,setView] =useState("dashboard");
   const [selJob,setSelJob]=useState(null);
   const [selCand,setSelCand]=useState(null);
@@ -766,6 +769,63 @@ export default function App() {
       return [...p,{date:d,provider:prov,input:inp,output:out,calls:1}];
     });
   };
+  const applyParsedJobToComposer=parsedJob=>{
+    if(!parsedJob) return;
+    setJobComposer(prev=>({
+      ...prev,
+      form:{
+        title:parsedJob.title||"",
+        department:parsedJob.department||"",
+        level:parsedJob.level||"",
+        salary:parsedJob.salary||"",
+        requirements:parsedJob.requirements||"",
+        t0:parsedJob.t0||"",
+        t1:parsedJob.t1||"",
+      },
+    }));
+  };
+  const resetJobComposer=()=>setJobComposer(EMPTY_JOB_COMPOSER());
+  const startJobFileParse=async file=>{
+    if(!file) return;
+    const taskId=`job-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    setJobComposer(prev=>({
+      ...prev,
+      open:true,
+      jdFileName:file.name,
+      jdLoading:true,
+      jdErr:"",
+      parsedJobs:[],
+      activeParsedJob:0,
+      taskId,
+    }));
+    try{
+      const res=await callAIWithJobFile(cfg,file,recordTokens);
+      if(res.error) throw new Error(res.raw||res.error);
+      const jobsFound=normalizeJobParseResult(res);
+      if(!jobsFound.length) throw new Error("没有识别到清晰岗位，请尝试更清晰的文件或分开上传");
+      setJobComposer(prev=>{
+        if(prev.taskId!==taskId) return prev;
+        return {
+          ...prev,
+          jdLoading:false,
+          jdErr:"",
+          parsedJobs:jobsFound,
+          activeParsedJob:0,
+          form:{
+            title:jobsFound[0].title||"",
+            department:jobsFound[0].department||"",
+            level:jobsFound[0].level||"",
+            salary:jobsFound[0].salary||"",
+            requirements:jobsFound[0].requirements||"",
+            t0:jobsFound[0].t0||"",
+            t1:jobsFound[0].t1||"",
+          },
+        };
+      });
+    }catch(error){
+      setJobComposer(prev=>prev.taskId!==taskId?prev:{...prev,jdLoading:false,jdErr:error?.message||"JD识别失败"});
+    }
+  };
   const openCand=(cid,jid)=>{if(jid)setSelJob(jid);setSelCand(cid);setCandTab("screening");setView("candidates");};
   const toggleCompare=(id)=>setCompared(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id].slice(-4));
 
@@ -804,6 +864,7 @@ export default function App() {
               <span style={{flex:1}}>{n.label}</span>
               {n.id==="settings"&&!Object.values(cfg.apiKeys||{}).some(Boolean)&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
+              {n.id==="jobs"&&jobComposer.jdLoading&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>识别中</span>}
             </button>
           ))}
           {compared.length>=2&&(
@@ -838,7 +899,7 @@ export default function App() {
 
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
-        {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens}/>}
+        {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
@@ -1204,51 +1265,17 @@ const FunnelBar=({label,rate,highlight})=>(
 );
 
 // ─── JOBS VIEW ───────────────────────────────────────────────
-function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cfg,recordTokens}) {
-  const [open,setOpen]=useState(false);
-  const [form,setForm]=useState({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
-  const [jdFile,setJdFile]=useState(null);
-  const [jdLoading,setJdLoading]=useState(false);
-  const [jdErr,setJdErr]=useState("");
+function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jobComposer,setJobComposer,resetJobComposer,applyParsedJobToComposer,startJobFileParse}) {
   const [jdDrag,setJdDrag]=useState(false);
-  const [parsedJobs,setParsedJobs]=useState([]);
-  const [activeParsedJob,setActiveParsedJob]=useState(0);
-  const ff=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
-
-  const applyParsedJobToForm=job=>{
-    if(!job) return;
-    setForm({
-      title:job.title||"",
-      department:job.department||"",
-      level:job.level||"",
-      salary:job.salary||"",
-      requirements:job.requirements||"",
-      t0:job.t0||"",
-      t1:job.t1||"",
-    });
-  };
-
-  const parseJD=async(file)=>{
-    setJdFile(file);setJdErr("");setJdLoading(true);
-    try{
-      const res=await callAIWithJobFile(cfg,file,recordTokens);
-      if(res.error) throw new Error(res.raw||res.error);
-      const jobsFound=normalizeJobParseResult(res);
-      if(!jobsFound.length) throw new Error("没有识别到清晰岗位，请尝试更清晰的文件或分开上传");
-      setParsedJobs(jobsFound);
-      setActiveParsedJob(0);
-      applyParsedJobToForm(jobsFound[0]);
-    }catch(e){setJdErr(e.message);}
-    setJdLoading(false);
-  };
+  const { open, form, jdFileName, jdLoading, jdErr, parsedJobs, activeParsedJob } = jobComposer;
+  const ff=k=>e=>setJobComposer(prev=>({...prev,form:{...prev.form,[k]:e.target.value}}));
 
   const resetCreateForm=()=>{
-    setOpen(false);setJdFile(null);setJdErr("");setJdDrag(false);setJdLoading(false);
-    setParsedJobs([]);setActiveParsedJob(0);
-    setForm({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
+    setJdDrag(false);
+    resetJobComposer();
   };
 
-  const onJdDrop=e=>{e.preventDefault();setJdDrag(false);const f=e.dataTransfer.files?.[0];if(f)parseJD(f);};
+  const onJdDrop=e=>{e.preventDefault();setJdDrag(false);const f=e.dataTransfer.files?.[0];if(f)startJobFileParse(f);};
   const saveJob=()=>{
     if(!form.title||!form.requirements)return;
     const j={...form,id:Date.now()};
@@ -1275,9 +1302,10 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{padding:"12px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,fontWeight:700,color:T.text}}>岗位列表</span>
-          <button onClick={()=>{if(open)resetCreateForm();else setOpen(true);}} style={{padding:"4px 10px",background:T.accent,color:T.accentFg,border:"none",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 新建</button>
+          <button onClick={()=>{if(open)resetCreateForm();else setJobComposer(prev=>({...prev,open:true}));}} style={{padding:"4px 10px",background:T.accent,color:T.accentFg,border:"none",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 新建</button>
         </div>
         {open&&(<div style={{padding:14,borderBottom:`1px solid ${T.border}`,background:T.card2}}>
+          {jdLoading&&<div style={{marginBottom:12,padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,fontSize:12,color:"#1d4ed8",lineHeight:1.8}}>JD 正在后台识别中。你现在切换到其他页面也不会中断，回来后结果会自动保留在这里。</div>}
           <div style={{marginBottom:12,padding:"12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:10}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
               <label style={{...lbSt(T),marginBottom:0}}>上传岗位 JD（AI 自动填表）</label>
@@ -1293,16 +1321,16 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
               onClick={()=>!jdLoading&&document.getElementById("job-jd-file-input")?.click()}
               style={{border:`2px dashed ${jdDrag?T.accent:T.border2}`,borderRadius:10,padding:"16px 14px",textAlign:"center",cursor:jdLoading?"default":"pointer",background:jdDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s"}}>
               <input id="job-jd-file-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}}
-                onChange={e=>{const f=e.target.files?.[0];if(f)parseJD(f);e.target.value="";}}/>
+                onChange={e=>{const f=e.target.files?.[0];if(f)startJobFileParse(f);e.target.value="";}}/>
               {jdLoading
                 ?<div><Spin text="AI 正在识别 JD..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动填入下面的岗位表单</div></div>
-                :jdFile
-                  ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已识别：{jdFile.name}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>字段已自动回填，你仍然可以手动修改</div></div>
+                :jdFileName
+                  ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已识别：{jdFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>字段已自动回填，你仍然可以手动修改</div></div>
                   :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入 JD 文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>支持 PDF、图片、Word(.docx) 和纯文本 JD</div></div>
               }
             </div>
             {jdErr&&<div style={{fontSize:11,color:"#dc2626",marginTop:8}}>{jdErr}</div>}
-            {!jdErr&&jdFile&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>文件会先提取成文字，再交给当前模型做多岗位结构化解析与规整。</div>}
+            {!jdErr&&jdFileName&&!jdLoading&&<div style={{fontSize:11,color:T.text4,marginTop:8}}>文件会先提取成文字，再交给当前模型做多岗位结构化解析与规整。</div>}
           </div>
           {parsedJobs.length>0&&<div style={{marginBottom:12,padding:"12px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:10}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
@@ -1323,7 +1351,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,cf
                       <div style={{fontSize:13,fontWeight:800,color:T.text}}>{job.title}</div>
                       <div style={{fontSize:11,color:T.text4,marginTop:3}}>{[job.department,job.level,job.salary].filter(Boolean).join(" · ")||"未补全字段"}</div>
                     </div>
-                    <button onClick={()=>{setActiveParsedJob(index);applyParsedJobToForm(job);}}
+                    <button onClick={()=>{setJobComposer(prev=>({...prev,activeParsedJob:index}));applyParsedJobToComposer(job);}}
                       style={{padding:"5px 10px",background:index===activeParsedJob?T.accent:"transparent",color:index===activeParsedJob?T.accentFg:T.text3,border:`1px solid ${index===activeParsedJob?T.accent:T.border2}`,borderRadius:7,cursor:"pointer",fontSize:12,flexShrink:0}}>
                       {index===activeParsedJob?"当前填入":"填入表单"}
                     </button>
