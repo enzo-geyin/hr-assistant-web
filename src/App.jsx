@@ -324,9 +324,13 @@ const formatQuestionBankContext = knowledge => {
 const buildScreeningPrompt = (job, resume, learningCtx="") => {
   const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
   const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
-  return `岗位：${job?.title||"未知"} 部门：${job?.department||""} 要求：${job?.requirements||""}
+  const genericHint = !job?.title && !job?.requirements
+    ? "当前尚未指定岗位，请先把简历规整成结构化人才画像，再按通用互联网招聘标准完成首轮潜力评分。重点识别候选人的职业方向、经验年限、核心技能、行业相关性、稳定性与风险项。"
+    : "";
+  return `岗位：${job?.title||"待分配岗位"} 部门：${job?.department||""} 要求：${job?.requirements||""}
 ${t0?`T0硬性条件：[${t0}]`:"请自行从要求中提取T0硬性条件"}
 ${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
+${genericHint?`\n${genericHint}`:""}
 ${learningCtx?`\n${learningCtx}`:""}
 薪酬：${job?.salary||"不限"} 简历：${resume}
 输出JSON：{"candidateName":"候选人姓名（如能识别）","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
@@ -635,7 +639,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
   return {
     candidate: {
       id: Date.now() + Math.floor(Math.random() * 1000000),
-      jobId: job.id,
+      jobId: job?.id ?? null,
       name: candidateName,
       status: getCandidateStatusFromScore(screening.overallScore),
       resume: normalizedResume,
@@ -1053,17 +1057,18 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 }
 
 function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}) {
-  const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "");
+  const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "__unassigned__");
   const [files,setFiles]=useState([]);
   const [drag,setDrag]=useState(false);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const [info,setInfo]=useState("");
-  const selectedJob=jobs.find(j=>String(j.id)===String(jobId));
+  const selectedJob=jobId==="__unassigned__"?null:jobs.find(j=>String(j.id)===String(jobId));
 
   useEffect(()=>{
-    if(!jobs.length){setJobId("");return;}
-    if(!jobs.some(job=>String(job.id)===String(jobId))) setJobId(String(jobs[0].id));
+    if(!jobs.length){setJobId("__unassigned__");return;}
+    if(jobId==="__unassigned__") return;
+    if(!jobs.some(job=>String(job.id)===String(jobId))) setJobId("__unassigned__");
   },[jobs,jobId]);
 
   const fileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
@@ -1092,7 +1097,6 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
   const removeFile=targetKey=>setFiles(prev=>prev.filter(file=>fileKey(file)!==targetKey));
 
   const submit=async()=>{
-    if(!selectedJob){setErr("请先选择要投递的岗位");return;}
     if(!files.length){setErr("请先拖入或选择至少一份简历");return;}
     setLoading(true);setErr("");setInfo("");
     const created=[];
@@ -1125,20 +1129,22 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
 
   return(
     <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"20px 20px 18px",marginBottom:22}}>
-      {jobs.length===0?<div style={{padding:"20px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,fontSize:13,color:T.text3,lineHeight:1.8}}>请先创建岗位，再把简历拖进来。系统会先识别文件内容，再按对应岗位自动完成第一轮分析。</div>
-      :<>
+      <>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
           <div>
             <div style={{fontSize:18,fontWeight:800,color:T.text}}>一键上传简历并完成 AI 首轮分析</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来，系统会自动识别文字、规整信息，并按所选岗位打出 0-5 分匹配度。</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来。你可以指定岗位，也可以先不指定，系统会先完成通用规整和首轮评分。</div>
           </div>
           <div style={{minWidth:260,flex:"0 0 280px"}}>
-            <label style={lbSt(T)}>投递岗位 *</label>
+            <label style={lbSt(T)}>投递岗位（可选）</label>
             <select value={jobId} onChange={e=>setJobId(e.target.value)} style={{...inSt(T),height:40}}>
+              <option value="__unassigned__">暂不指定岗位 · 先做通用初筛</option>
               {jobs.map(job=><option key={job.id} value={job.id}>{job.title}{job.department?` · ${job.department}`:""}</option>)}
             </select>
           </div>
         </div>
+
+        {!jobs.length&&<div style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:12,color:T.text3,lineHeight:1.8,marginBottom:14}}>当前还没有创建岗位，仍然可以直接上传简历。系统会先按通用标准完成规整和首轮评分，后续再补岗位即可。</div>}
 
         <div
           onDragOver={e=>{e.preventDefault();setDrag(true);}}
@@ -1155,7 +1161,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
             :<>
               <div style={{fontSize:36,lineHeight:1,marginBottom:12}}>⇪</div>
               <div style={{fontSize:19,fontWeight:800,color:T.text}}>把简历拖到这里，或点击选择文件</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前岗位会按 <strong style={{color:T.text}}>{selectedJob?.title||"未选择岗位"}</strong> 的标准做首轮分析。</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前会按 <strong style={{color:T.text}}>{selectedJob?.title||"通用初筛模式"}</strong> 的标准做首轮分析。</div>
             </>}
         </div>
 
@@ -1165,7 +1171,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
           </div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
             {files.length>0&&<button onClick={()=>setFiles([])} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
-            <button onClick={submit} disabled={loading||!files.length||!selectedJob} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
+            <button onClick={submit} disabled={loading||!files.length} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
               {loading?"正在批量分析...":"开始识别并导入"}
             </button>
           </div>
@@ -1185,7 +1191,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
         </div>}
         {info&&<div style={{marginTop:14,padding:"10px 12px",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:9,fontSize:12,color:"#166534",lineHeight:1.7}}>{info}</div>}
         {err&&<div style={{marginTop:14}}><ErrBox>{err}</ErrBox></div>}
-      </>}
+      </>
     </div>
   );
 }
