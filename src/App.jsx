@@ -607,6 +607,51 @@ async function callAIWithJobFile(cfg, file, onTokens) {
   );
 }
 
+async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "") {
+  const normalizedResume = normalizeExtractedText(resumeText).slice(0,30000);
+  if (!normalizedResume) throw new Error("未能从简历文件中提取到有效文字，请换一个更清晰的文件");
+
+  let learning = { rubric: null, rubricSummary: "", questionBank: null, questionBankSummary: "" };
+  try {
+    learning = await fetchKnowledgeState(cfg.proxyToken || "", job?.id);
+  } catch {}
+
+  const screening = await callAI(
+    cfg,
+    "你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。",
+    buildScreeningPrompt(job, normalizedResume, formatRubricContext(learning)),
+    onTokens,
+    dirCtx,
+    { maxTokens: 2200 }
+  );
+  if (screening.error) throw new Error(screening.raw || screening.error);
+  return { normalizedResume, screening, learning };
+}
+
+async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "" }) {
+  const extractedResume = await extractFileText(file);
+  const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx);
+  const candidateName = name.trim() || screening.candidateName || "未命名";
+  return {
+    candidate: {
+      id: Date.now() + Math.floor(Math.random() * 1000000),
+      jobId: job.id,
+      name: candidateName,
+      status: getCandidateStatusFromScore(screening.overallScore),
+      resume: normalizedResume,
+      resumeFileName: file.name,
+      screening,
+      questions: null,
+      interviews: [],
+      scheduledAt: null,
+      interviewRound: null,
+      directorVerdict: null,
+    },
+    screening,
+    normalizedResume,
+  };
+}
+
 // ─── THEME ───────────────────────────────────────────────────
 const THEMES=[{id:"light",name:"浅色"},{id:"dark",name:"深色"},{id:"warm",name:"暖白"},{id:"slate",name:"石板"}];
 const getTheme=id=>({
@@ -626,6 +671,14 @@ const STATUS={
 };
 const scColor=(v,max=5)=>v/max>=0.8?"#16a34a":v/max>=0.6?"#ca8a04":"#dc2626";
 const recSt=r=>r==="建议通过"?{c:"#16a34a",bg:"#dcfce7"}:r==="待定"?{c:"#ca8a04",bg:"#fef9c3"}:{c:"#dc2626",bg:"#fee2e2"};
+const getScoreBand = score => {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return { label: "未筛选", color: "#6b7280", bg: "#f3f4f6", status: "pending", range: "等待 AI 首轮分析" };
+  if (n >= 4.5) return { label: "合格", color: "#059669", bg: "#ecfdf5", status: "screening", range: "4.5 - 5.0" };
+  if (n >= 3) return { label: "待定", color: "#d97706", bg: "#fffbeb", status: "watching", range: "3.0 - 4.4" };
+  return { label: "淘汰", color: "#dc2626", bg: "#fef2f2", status: "rejected", range: "0 - 2.9" };
+};
+const getCandidateStatusFromScore = score => getScoreBand(score).status;
 const fmt=n=>n?.toLocaleString()||"0";
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const isSoon=s=>{if(!s)return false;const d=(new Date(s)-new Date())/86400000;return d>=-0.1&&d<=7;};
@@ -780,7 +833,7 @@ export default function App() {
       </aside>
 
       <main style={{flex:1,overflow:"auto"}}>
-        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} upcoming={upcoming} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand}/>}
+        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
@@ -864,7 +917,7 @@ const CmpScore=({it})=>{
 };
 
 // ─── DASHBOARD ───────────────────────────────────────────────
-function DashboardView({T,jobs,cands,upcoming,dirStats,onJobClick,onCandClick}) {
+function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cfg,recordTokens,dirCtx}) {
   const stats=[
     {label:"简历通过",val:cands.filter(c=>c.status==="screening").length,color:"#2563eb"},
     {label:"观察中",  val:cands.filter(c=>c.status==="watching").length, color:"#d97706"},
@@ -873,10 +926,11 @@ function DashboardView({T,jobs,cands,upcoming,dirStats,onJobClick,onCandClick}) 
     {label:"未通过",  val:cands.filter(c=>c.status==="rejected").length, color:"#dc2626"},
   ];
   const total=cands.length;
-  const funnelData=jobs.map(j=>{
-    const jc=cands.filter(c=>c.jobId===j.id);
-    return{job:j,total:jc.length,screened:jc.filter(c=>["screening","watching","interview","offer"].includes(c.status)).length,interviewed:jc.filter(c=>["interview","offer"].includes(c.status)).length,offered:jc.filter(c=>c.status==="offer").length};
-  }).filter(d=>d.total>0);
+  const rankedCands=[...cands].sort((a,b)=>(b.screening?.overallScore??-1)-(a.screening?.overallScore??-1));
+  const addImportedCandidates=created=>{
+    if(!created?.length) return;
+    setCands(prev=>[...created,...prev]);
+  };
 
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
     {/* 板块1：数据看板 */}
@@ -905,106 +959,235 @@ function DashboardView({T,jobs,cands,upcoming,dirStats,onJobClick,onCandClick}) 
       </div>
     </div>
 
-    {/* 板块2+3：在招岗位 & 候选人列表 */}
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1.7fr",gap:16,marginBottom:22}}>
-      <div>
-        <SecLabel T={T}>在招岗位 ({jobs.length})</SecLabel>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
-          {jobs.length===0?<div style={{padding:"36px 20px",textAlign:"center",color:T.text4,fontSize:13}}>暂无在招岗位</div>
-          :jobs.map((j,i)=>{
-            const jc=cands.filter(c=>c.jobId===j.id);
-            return(<div key={j.id} onClick={()=>onJobClick(j.id)} className="hr" style={{padding:"13px 16px",borderBottom:i<jobs.length-1?`1px solid ${T.border}`:"none",cursor:"pointer"}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-                <div><div style={{fontSize:14,fontWeight:700,color:T.text}}>{j.title}</div><div style={{fontSize:11,color:T.text4,marginTop:1}}>{[j.department,j.level,j.salary].filter(Boolean).join(" · ")||"未指定部门"}</div></div>
-                <span style={{fontSize:12,color:T.text3,flexShrink:0,marginLeft:8}}>{jc.length}人</span>
-              </div>
-              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                {[["screening","#eff6ff","#2563eb","通过"],["watching","#fffbeb","#d97706","观察"],["interview","#f5f3ff","#7c3aed","面试"],["offer","#ecfdf5","#059669","录用"],["rejected","#fef2f2","#dc2626","未过"]].map(([s,bg,c,l])=>{
-                  const n=jc.filter(x=>x.status===s).length;
-                  return n>0?<span key={s} style={{fontSize:10,padding:"2px 6px",background:bg,color:c,borderRadius:10,fontWeight:600}}>{n}{l}</span>:null;
-                })}
-              </div>
-            </div>);
-          })}
-        </div>
-      </div>
-      <div>
-        <SecLabel T={T}>候选人列表 ({cands.length})</SecLabel>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
-          {cands.length===0?<div style={{padding:"36px 20px",textAlign:"center",color:T.text4,fontSize:13}}>暂无候选人</div>
-          :<>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1.3fr 1fr 1fr 1fr",padding:"7px 14px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4}}>
-              <span>姓名</span><span>岗位</span><span style={{textAlign:"center"}}>评分</span><span style={{textAlign:"center"}}>状态</span><span style={{textAlign:"center"}}>总监判断</span>
+    {/* 板块2：在招岗位 */}
+    <SecLabel T={T}>在招岗位 ({jobs.length})</SecLabel>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12,marginBottom:22}}>
+      {jobs.length===0?<div style={{gridColumn:"1 / -1"}}><Empty T={T} icon="◈" title="暂无在招岗位" sub="先去岗位管理新建岗位，再开始批量上传简历。"/></div>
+      :jobs.map(job=>{
+        const jobCands=cands.filter(c=>c.jobId===job.id);
+        const qualified=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="合格").length;
+        const pending=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="待定").length;
+        const rejected=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="淘汰").length;
+        return(<div key={job.id} onClick={()=>onJobClick(job.id)} className="hr" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 16px 14px",cursor:"pointer"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:800,color:T.text}}>{job.title}</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:3}}>{[job.department,job.level,job.salary].filter(Boolean).join(" · ")||"待补充岗位信息"}</div>
             </div>
-            <div style={{maxHeight:340,overflowY:"auto"}}>
-              {cands.map(c=>{
-                const j=jobs.find(j=>j.id===c.jobId);
-                const scr=c.screening;
-                const dir=c.directorVerdict;
-                return(<div key={c.id} onClick={()=>onCandClick(c.id,c.jobId)} className="hr"
-                  style={{display:"grid",gridTemplateColumns:"2fr 1.3fr 1fr 1fr 1fr",padding:"9px 14px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",alignItems:"center"}}>
-                  <div style={{display:"flex",gap:7,alignItems:"center"}}><Av name={c.name} T={T} size={26}/><span style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||<span style={{color:T.text4}}>未命名</span>}</span></div>
-                  <span style={{fontSize:12,color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j?.title||"—"}</span>
-                  <span style={{textAlign:"center",fontWeight:700,fontSize:13,color:scr?scColor(scr.overallScore):T.text4}}>{scr?scr.overallScore?.toFixed(1):"—"}</span>
-                  <span style={{textAlign:"center"}}><SBadge status={c.status}/></span>
-                  <span style={{textAlign:"center",fontSize:12,fontWeight:700,color:dir?.verdict==="录用"?"#059669":dir?.verdict==="淘汰"?"#dc2626":dir?.verdict?"#ca8a04":T.text4}}>{dir?.verdict||"—"}</span>
-                </div>);
-              })}
-            </div>
-          </>}
-        </div>
-      </div>
+            <span style={{fontSize:11,fontWeight:700,padding:"4px 8px",background:T.card2,borderRadius:20,color:T.text3,whiteSpace:"nowrap"}}>{jobCands.length} 份简历</span>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+            {[{label:"合格",count:qualified,color:"#059669",bg:"#ecfdf5"},{label:"待定",count:pending,color:"#d97706",bg:"#fffbeb"},{label:"淘汰",count:rejected,color:"#dc2626",bg:"#fef2f2"}].map(item=>(
+              <div key={item.label} style={{padding:"10px 8px",background:item.bg,borderRadius:9,textAlign:"center"}}>
+                <div style={{fontSize:20,fontWeight:900,color:item.color,lineHeight:1}}>{item.count}</div>
+                <div style={{fontSize:11,color:item.color,marginTop:4,fontWeight:700}}>{item.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>);
+      })}
     </div>
 
-    {/* 板块4：近期面试 */}
-    {upcoming.length>0&&(
-      <div style={{marginBottom:22}}>
-        <SecLabel T={T}>近期面试安排（7天内）</SecLabel>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:12}}>
-          {upcoming.map(c=>{
-            const j=jobs.find(j=>j.id===c.jobId);
-            const diffH=Math.round((new Date(c.scheduledAt)-new Date())/3600000);
-            const soon=diffH<=24;
-            return(<div key={c.id} onClick={()=>onCandClick(c.id,c.jobId)} className="hr"
-              style={{background:T.surface,border:`1px solid ${soon?"#f59e0b":T.border}`,borderRadius:10,padding:"14px 16px",cursor:"pointer",borderLeft:`4px solid ${soon?"#f59e0b":"#7c3aed"}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <Av name={c.name} T={T} size={28}/>
-                  <div><div style={{fontSize:13,fontWeight:700,color:T.text}}>{c.name||"未命名"}</div><div style={{fontSize:11,color:T.text4}}>{j?.title||""}</div></div>
-                </div>
-                {soon&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",background:"#fef3c7",color:"#d97706",borderRadius:10,alignSelf:"flex-start"}}>即将</span>}
-              </div>
-              <div style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>📅 {fmtDate(c.scheduledAt)}</div>
-              {c.interviewRound&&<div style={{fontSize:11,color:T.text4,marginTop:3}}>{c.interviewRound}</div>}
-            </div>);
-          })}
-        </div>
-      </div>
-    )}
-
-    {/* 板块5：招聘漏斗分析 */}
-    {funnelData.length>0&&(
-      <div>
-        <SecLabel T={T}>招聘漏斗分析</SecLabel>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 20px"}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,padding:"0 0 12px",borderBottom:`1px solid ${T.border}`,marginBottom:16,fontSize:11,fontWeight:700,color:T.text4}}>
-            <span>岗位</span><span style={{textAlign:"center"}}>简历通过率</span><span style={{textAlign:"center"}}>面试转化率</span><span style={{textAlign:"center"}}>录用率</span>
+    {/* 板块3：评分标准 */}
+    <SecLabel T={T}>评分标准</SecLabel>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12,marginBottom:22}}>
+      {[
+        {label:"合格",range:"4.5 - 5.0",desc:"建议直接进入下一轮，优先安排面试。",color:"#059669",bg:"#ecfdf5"},
+        {label:"待定",range:"3.0 - 4.4",desc:"保留在观察池，建议补充验证或二次筛选。",color:"#d97706",bg:"#fffbeb"},
+        {label:"淘汰",range:"0 - 2.9",desc:"与岗位要求偏差较大，建议结束当前流程。",color:"#dc2626",bg:"#fef2f2"},
+      ].map(item=>(
+        <div key={item.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 16px 14px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <Chip c={item.color} bg={item.bg} lg>{item.label}</Chip>
+            <div style={{fontSize:20,fontWeight:900,color:item.color}}>{item.range}</div>
           </div>
-          {funnelData.map(({job:j,total,screened,interviewed,offered})=>{
-            const r1=total>0?Math.round(screened/total*100):0;
-            const r2=screened>0?Math.round(interviewed/screened*100):0;
-            const r3=interviewed>0?Math.round(offered/interviewed*100):0;
-            return(<div key={j.id} style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,padding:"12px 0",borderBottom:`1px solid ${T.border}`,alignItems:"center"}}>
-              <div><div style={{fontSize:13,fontWeight:700,color:T.text}}>{j.title}</div><div style={{fontSize:11,color:T.text4}}>{j.department||""}</div></div>
-              <FunnelBar label={`${screened}/${total}`} rate={r1}/>
-              <FunnelBar label={`${interviewed}/${screened}`} rate={r2}/>
-              <FunnelBar label={`${offered}/${interviewed}`} rate={r3} highlight={offered>0}/>
+          <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>{item.desc}</div>
+        </div>
+      ))}
+    </div>
+
+    {/* 板块4：简历上传 */}
+    <SecLabel T={T}>简历上传</SecLabel>
+    <DashboardResumeUploader T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onBatchCreated={addImportedCandidates}/>
+
+    {/* 板块5：候选人列表 */}
+    <SecLabel T={T}>候选人列表 ({cands.length})</SecLabel>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
+      {rankedCands.length===0?<div style={{padding:"44px 20px",textAlign:"center",color:T.text4,fontSize:13}}>上传简历后，这里会按 AI 首轮匹配度展示候选人。</div>
+      :<>
+        <div style={{display:"grid",gridTemplateColumns:"1.7fr 1.3fr 0.85fr 0.9fr 0.95fr",padding:"8px 16px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4}}>
+          <span>候选人</span>
+          <span>在招岗位</span>
+          <span style={{textAlign:"center"}}>AI 匹配分</span>
+          <span style={{textAlign:"center"}}>首轮判定</span>
+          <span style={{textAlign:"center"}}>AI 建议</span>
+        </div>
+        <div style={{maxHeight:420,overflowY:"auto"}}>
+          {rankedCands.map(c=>{
+            const job=jobs.find(j=>j.id===c.jobId);
+            const band=getScoreBand(c.screening?.overallScore);
+            return(<div key={c.id} onClick={()=>onCandClick(c.id,c.jobId)} className="hr" style={{display:"grid",gridTemplateColumns:"1.7fr 1.3fr 0.85fr 0.9fr 0.95fr",padding:"12px 16px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",alignItems:"center",gap:10}}>
+              <div style={{display:"flex",gap:9,alignItems:"center",minWidth:0}}>
+                <Av name={c.name} T={T} size={30}/>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
+                  <div style={{fontSize:11,color:T.text4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.resumeFileName||"手动录入"}</div>
+                </div>
+              </div>
+              <div style={{fontSize:12,color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job?.title||"未绑定岗位"}</div>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:24,fontWeight:900,color:Number.isFinite(Number(c.screening?.overallScore))?scColor(c.screening?.overallScore):T.text4,lineHeight:1}}>{Number.isFinite(Number(c.screening?.overallScore))?Number(c.screening.overallScore).toFixed(1):"—"}</div>
+                <div style={{fontSize:10,color:T.text4,marginTop:4}}>/ 5.0</div>
+              </div>
+              <div style={{textAlign:"center"}}><Chip c={band.color} bg={band.bg} lg>{band.label}</Chip></div>
+              <div style={{textAlign:"center"}}>
+                {c.screening?.recommendation?<Chip c={recSt(c.screening.recommendation).c} bg={recSt(c.screening.recommendation).bg}>{c.screening.recommendation.replace("建议","")}</Chip>
+                :<span style={{fontSize:12,color:T.text4}}>未筛选</span>}
+              </div>
             </div>);
           })}
         </div>
-      </div>
-    )}
+      </>}
+    </div>
   </Page>);
+}
+
+function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}) {
+  const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "");
+  const [files,setFiles]=useState([]);
+  const [drag,setDrag]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState("");
+  const [info,setInfo]=useState("");
+  const selectedJob=jobs.find(j=>String(j.id)===String(jobId));
+
+  useEffect(()=>{
+    if(!jobs.length){setJobId("");return;}
+    if(!jobs.some(job=>String(job.id)===String(jobId))) setJobId(String(jobs[0].id));
+  },[jobs,jobId]);
+
+  const fileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
+  const queueFiles=inputFiles=>{
+    const picked=Array.from(inputFiles||[]).filter(Boolean);
+    if(!picked.length) return;
+    const accepted=[];
+    const rejected=[];
+    picked.forEach(file=>{
+      if(getFileKind(file)==="unknown") rejected.push(file.name);
+      else accepted.push(file);
+    });
+    setFiles(prev=>{
+      const existing=new Set(prev.map(fileKey));
+      const next=[...prev];
+      accepted.forEach(file=>{
+        const key=fileKey(file);
+        if(!existing.has(key)){existing.add(key);next.push(file);}
+      });
+      return next;
+    });
+    setInfo("");
+    setErr(rejected.length?`以下文件格式暂不支持：${rejected.join("、")}`:"");
+  };
+
+  const removeFile=targetKey=>setFiles(prev=>prev.filter(file=>fileKey(file)!==targetKey));
+
+  const submit=async()=>{
+    if(!selectedJob){setErr("请先选择要投递的岗位");return;}
+    if(!files.length){setErr("请先拖入或选择至少一份简历");return;}
+    setLoading(true);setErr("");setInfo("");
+    const created=[];
+    const failed=[];
+    const failedKeys=new Set();
+    for(const file of files){
+      try{
+        const { candidate }=await createCandidateFromResumeFile({cfg,job:selectedJob,file,onTokens:recordTokens,dirCtx});
+        created.push(candidate);
+      }catch(error){
+        failed.push(`${file.name}：${error?.message||"识别失败"}`);
+        failedKeys.add(fileKey(file));
+      }
+    }
+    if(created.length){
+      onBatchCreated(created);
+      const summary=created.reduce((acc,candidate)=>{
+        const label=getScoreBand(candidate.screening?.overallScore).label;
+        if(label==="合格") acc.pass+=1;
+        else if(label==="待定") acc.pending+=1;
+        else if(label==="淘汰") acc.reject+=1;
+        return acc;
+      },{pass:0,pending:0,reject:0});
+      setInfo(`已导入 ${created.length} 份简历：合格 ${summary.pass} 份，待定 ${summary.pending} 份，淘汰 ${summary.reject} 份。`);
+    }
+    setFiles(prev=>prev.filter(file=>failedKeys.has(fileKey(file))));
+    if(failed.length) setErr(failed.slice(0,3).join("；"));
+    setLoading(false);
+  };
+
+  return(
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"20px 20px 18px",marginBottom:22}}>
+      {jobs.length===0?<div style={{padding:"20px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,fontSize:13,color:T.text3,lineHeight:1.8}}>请先创建岗位，再把简历拖进来。系统会先识别文件内容，再按对应岗位自动完成第一轮分析。</div>
+      :<>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:800,color:T.text}}>一键上传简历并完成 AI 首轮分析</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来，系统会自动识别文字、规整信息，并按所选岗位打出 0-5 分匹配度。</div>
+          </div>
+          <div style={{minWidth:260,flex:"0 0 280px"}}>
+            <label style={lbSt(T)}>投递岗位 *</label>
+            <select value={jobId} onChange={e=>setJobId(e.target.value)} style={{...inSt(T),height:40}}>
+              {jobs.map(job=><option key={job.id} value={job.id}>{job.title}{job.department?` · ${job.department}`:""}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div
+          onDragOver={e=>{e.preventDefault();setDrag(true);}}
+          onDragLeave={()=>setDrag(false)}
+          onDrop={e=>{e.preventDefault();setDrag(false);queueFiles(e.dataTransfer.files);}}
+          onClick={()=>!loading&&document.getElementById("dashboard-resume-upload-input")?.click()}
+          style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:16,minHeight:220,padding:"26px 24px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",background:drag?`${T.accent}10`:T.card2,cursor:loading?"default":"pointer",transition:"all 0.15s"}}>
+          <input id="dashboard-resume-upload-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" multiple style={{display:"none"}} onChange={e=>{queueFiles(e.target.files);e.target.value="";}}/>
+          {loading
+            ?<div>
+              <Spin text="正在识别简历并生成首轮评分..." />
+              <div style={{fontSize:12,color:T.text4,marginTop:8}}>会先抽取文字，再结合岗位要求与学习规则完成自动初筛</div>
+            </div>
+            :<>
+              <div style={{fontSize:36,lineHeight:1,marginBottom:12}}>⇪</div>
+              <div style={{fontSize:19,fontWeight:800,color:T.text}}>把简历拖到这里，或点击选择文件</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前岗位会按 <strong style={{color:T.text}}>{selectedJob?.title||"未选择岗位"}</strong> 的标准做首轮分析。</div>
+            </>}
+        </div>
+
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:14,flexWrap:"wrap"}}>
+          <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>
+            {files.length?`已加入 ${files.length} 份待处理简历，可继续拖入补充。`:"还没有加入简历文件。"}
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            {files.length>0&&<button onClick={()=>setFiles([])} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
+            <button onClick={submit} disabled={loading||!files.length||!selectedJob} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
+              {loading?"正在批量分析...":"开始识别并导入"}
+            </button>
+          </div>
+        </div>
+
+        {files.length>0&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+          {files.map(file=>{
+            const key=fileKey(file);
+            return(<div key={key} style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
+                <div style={{fontSize:11,color:T.text4,marginTop:3}}>{(file.size/1024/1024).toFixed(2)} MB</div>
+              </div>
+              <button onClick={e=>{e.stopPropagation();removeFile(key);}} style={{border:"none",background:"transparent",color:T.text4,cursor:"pointer",fontSize:16,lineHeight:1}}>✕</button>
+            </div>);
+          })}
+        </div>}
+        {info&&<div style={{marginTop:14,padding:"10px 12px",background:"#ecfdf5",border:"1px solid #bbf7d0",borderRadius:9,fontSize:12,color:"#166534",lineHeight:1.7}}>{info}</div>}
+        {err&&<div style={{marginTop:14}}><ErrBox>{err}</ErrBox></div>}
+      </>}
+    </div>
+  );
 }
 const FunnelBar=({label,rate,highlight})=>(
   <div style={{textAlign:"center"}}>
@@ -1290,41 +1473,8 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
     if(!resumeFile){setErr("请先上传简历文件");return;}
     setErr("");setInfo("");setLoading(true);
     try{
-      const extractedResume=await extractFileText(resumeFile);
-      const normalizedResume=normalizeExtractedText(extractedResume).slice(0,30000);
-      if(!normalizedResume) throw new Error("未能从简历中提取出有效文字，请换一个更清晰的文件");
-
-      let learning={rubric:null,rubricSummary:"",questionBank:null,questionBankSummary:""};
-      try{
-        learning=await fetchKnowledgeState(cfg.proxyToken||"",selectedJob.id);
-      }catch{}
-
-      const res=await callAI(
-        cfg,
-        `你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。`,
-        buildScreeningPrompt(selectedJob, normalizedResume, formatRubricContext(learning)),
-        recordTokens,
-        dirCtx,
-        {maxTokens:2200}
-      );
-      if(res.error) throw new Error(res.raw||res.error);
-
-      const candidateName=name.trim()||res.candidateName||"未命名";
-      const candidate={
-        id:Date.now(),
-        jobId:selectedJob.id,
-        name:candidateName,
-        status:res.recommendation==="建议通过"?"screening":res.recommendation==="待定"?"watching":"rejected",
-        resume:normalizedResume,
-        resumeFileName:resumeFile.name,
-        screening:res,
-        questions:null,
-        interviews:[],
-        scheduledAt:null,
-        interviewRound:null,
-        directorVerdict:null,
-      };
-      setInfo(`已完成识别与初筛：${candidateName} / ${res.recommendation}`);
+      const { candidate, screening }=await createCandidateFromResumeFile({cfg,job:selectedJob,file:resumeFile,onTokens:recordTokens,dirCtx,name});
+      setInfo(`已完成识别与初筛：${candidate.name} / ${getScoreBand(screening.overallScore).label}`);
       onCreated(candidate);
     }catch(error){
       setErr(error?.message||"上传简历失败");
@@ -1492,13 +1642,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
     setResumeFileName(nextResumeFileName);
     updCand(cand.id,{name:name||cand.name,resume:normalizedResume,resumeFileName:nextResumeFileName});
     try{
-      const res=await callAI(cfg,
-        `你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。`,
-        buildScreeningPrompt(job, normalizedResume, learningHint),
-        recordTokens,dirCtx,
-        {maxTokens:2200}
-      );
-      if(res.error) throw new Error(res.raw||res.error);
+      const { screening:res }=await runResumeScreening(cfg, job, normalizedResume, recordTokens, dirCtx);
       const candName=res.candidateName||name||cand.name||"";
       if(candName&&!name) setName(candName);
       updCand(cand.id,{
@@ -1506,7 +1650,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
         resume:normalizedResume,
         resumeFileName:nextResumeFileName,
         screening:res,
-        status:res.recommendation==="建议通过"?"screening":res.recommendation==="待定"?"watching":"rejected"
+        status:getCandidateStatusFromScore(res.overallScore)
       });
     }catch(e){throw e;}
   };
