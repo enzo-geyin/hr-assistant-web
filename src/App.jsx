@@ -350,7 +350,19 @@ const buildQuestionPrompt = (job, cand, knowledge) => {
 ${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}生成10道结构化面试题，返回JSON：
 {"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
 步骤：1.开场破冰 2.自我介绍 3.离职动机 4.行为面试STAR(4-5题) 5.专业题(2题) 6.反问
-要求：优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。`;
+要求：
+1. 优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。
+2. 必须返回合法 JSON，只能有一个顶层对象，顶层键名固定为 questions。
+3. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
+4. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
+};
+
+const normalizeQuestionsPayload = payload => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.questions)) return payload.questions;
+  if (Array.isArray(payload?.data?.questions)) return payload.data.questions;
+  if (Array.isArray(payload?.result?.questions)) return payload.result.questions;
+  return [];
 };
 
 const summarizeInterviews = cand => (cand.interviews||[])
@@ -1884,10 +1896,13 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       const res=await callAI(cfg,
         `你是资深HR面试官，请严格按JSON格式输出，不含任何markdown标记。`,
         buildQuestionPrompt(job, cand, learning),
-        recordTokens,dirCtx
+        recordTokens,dirCtx,
+        {maxTokens:2600}
       );
-      if(res.error) throw new Error(res.error);
-      updCand(cand.id,{questions:res.questions});
+      if(res.error) throw new Error(res.raw||res.error);
+      const questions=normalizeQuestionsPayload(res);
+      if(!questions.length) throw new Error("模型已返回内容，但没有识别到有效的面试题列表");
+      updCand(cand.id,{questions});
     }catch(e){setErr(e.message);}
     setLoading(false);
   };
