@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 // ─── PERSIST ─────────────────────────────────────────────────
@@ -2198,8 +2198,53 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
   const [notes,setNotes]=useState("");
   const [schedDate,setSchedDate]=useState("");
   const [schedTime,setSchedTime]=useState("10:00");
+  const [noteFile,setNoteFile]=useState(null);
+  const [noteFileName,setNoteFileName]=useState("");
+  const [noteDrag,setNoteDrag]=useState(false);
+  const [fileLoading,setFileLoading]=useState(false);
+  const [fileInfo,setFileInfo]=useState("");
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
+  const dateInputRef=useRef(null);
+  const timeInputRef=useRef(null);
+
+  const openPicker=ref=>{
+    const input=ref?.current;
+    if(!input) return;
+    if(typeof input.showPicker==="function") input.showPicker();
+    else{
+      input.focus();
+      input.click?.();
+    }
+  };
+
+  const queueNoteFile=file=>{
+    if(!file) return;
+    if(getFileKind(file)==="unknown"){setErr("仅支持 PDF、图片、Word(.docx) 或纯文本面试记录文件");return;}
+    setNoteFile(file);
+    setNoteFileName(file.name);
+    setErr("");
+    setFileInfo("");
+  };
+
+  const appendInterviewFile=async()=>{
+    if(!noteFile){setErr("请先上传面试记录文件");return;}
+    setErr("");
+    setFileInfo("");
+    setFileLoading(true);
+    try{
+      const extracted=normalizeExtractedText(await extractFileText(noteFile)).slice(0,20000);
+      if(!extracted) throw new Error("未能从面试记录文件中提取到有效文字，请换一个更清晰的文件");
+      const merged=notes.trim()
+        ? `${notes.trim()}\n\n【上传文件：${noteFile.name}】\n${extracted}`
+        : `【上传文件：${noteFile.name}】\n${extracted}`;
+      setNotes(merged);
+      setFileInfo(`已识别并追加：${noteFile.name}`);
+    }catch(error){
+      setErr(error?.message||"面试记录文件识别失败");
+    }
+    setFileLoading(false);
+  };
 
   const saveSchedule=()=>{
     if(!schedDate)return;
@@ -2229,7 +2274,7 @@ T1维度(简历)：${JSON.stringify(cand.screening?.t1?.items?.map(i=>({d:i.dime
         scheduledAt:null,
         status:res.decision==="通过"?(round.includes("终")?"offer":"interview"):res.decision==="淘汰"?"rejected":"watching"
       });
-      setNotes("");setRound("一面");
+      setNotes("");setRound("一面");setNoteFile(null);setNoteFileName("");setFileInfo("");
     }catch(e){setErr(e.message);}
     setLoading(false);
   };
@@ -2243,8 +2288,20 @@ T1维度(简历)：${JSON.stringify(cand.screening?.t1?.items?.map(i=>({d:i.dime
             {["一面","二面","三面","终面","HR面"].map(r=><option key={r}>{r}</option>)}
           </select>
         </div>
-        <div><label style={lbSt(T)}>面试日期</label><input type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T)}}/></div>
-        <div><label style={lbSt(T)}>面试时间</label><input type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T)}}/></div>
+        <div>
+          <label style={lbSt(T)}>面试日期</label>
+          <div style={{display:"flex",gap:8}}>
+            <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1}}/>
+            <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:8,background:T.surface,color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
+          </div>
+        </div>
+        <div>
+          <label style={lbSt(T)}>面试时间</label>
+          <div style={{display:"flex",gap:8}}>
+            <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1}}/>
+            <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:8,background:T.surface,color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
+          </div>
+        </div>
         <button onClick={saveSchedule} disabled={!schedDate}
           style={{padding:"8px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:7,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
           确认预约
@@ -2253,13 +2310,42 @@ T1维度(简历)：${JSON.stringify(cand.screening?.t1?.items?.map(i=>({d:i.dime
       {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
     </SCard>
     <SCard T={T} title="录入面试记录">
+      <div style={{marginBottom:12,padding:"14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:T.text}}>上传面试记录文件</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx) 与纯文本文件，识别后会自动追加到笔记里</div>
+          </div>
+          <button onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:fileLoading?"not-allowed":"pointer",opacity:fileLoading?0.5:1}}>选择文件</button>
+        </div>
+        <div
+          onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
+          onDragLeave={()=>setNoteDrag(false)}
+          onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
+          onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
+          style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:12,padding:"18px 14px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:10}}>
+          <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
+          {fileLoading
+            ?<div><Spin text="正在识别面试记录文件..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
+            :noteFileName
+              ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
+              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、语音转写文本等</div></div>
+          }
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div style={{fontSize:11,color:T.text4}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
+          <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"8px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:8,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:700}}>
+            {fileLoading?"识别中...":"识别并追加到笔记"}
+          </button>
+        </div>
+      </div>
       <div style={{marginBottom:12}}><label style={lbSt(T)}>面试笔记 *</label>
         <textarea rows={10} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.7}}
           placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
       </div>
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ AI将参考你的历史判断标准进行评估</div>}
       {err&&<ErrBox>{err}</ErrBox>}
-      <BtnPrimary T={T} loading={loading} disabled={loading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
+      <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
     </SCard>
   </div>);
 }
