@@ -341,20 +341,115 @@ ${learningCtx?`\n${learningCtx}`:""}
 "risks":["风险1"]}`;
 };
 
+const INTERVIEW_RULES_PROMPT = `【面试题生成准则】
+1. 只用过去看未来：所有问题都必须锚定候选人过去真实做过的项目、结果、冲突、失败、复盘，不允许使用“如果你入职后打算怎么做”这类假设性问题。
+2. 先打假显性指标：如果简历里写了业绩、带队、爆款、投放消耗、ROI、管理经验，必须通过执行细节追问，区分他到底是核心操盘手、协同推进者，还是只是参与执行。
+3. 要挖隐性指标：除了硬技能，还要考察概念能力、品格、人际沟通、倾听抓取、失败归因、复盘质量。
+4. 必须保留压力测试：对于年资较深、表达成熟、明显会包装的候选人，至少安排1道带质疑的压力测试题，观察其情绪稳定性、事实感和沟通方式。
+5. 必须覆盖过去公司的组织架构：不要只听 title，要通过部门规模、汇报关系、带人情况、KPI 制定方式，判断其真实生态位。
+6. 必须覆盖过去做过的产品、人群、流量选择：追问他做过什么产品、打什么人群、选什么流量、为什么这么选、效果如何复盘。`;
+
+const buildRoleBaselinePrompt = (job, cand) => {
+  const corpus = `${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`.toLowerCase();
+  const blocks = [];
+  const hasTrafficKeywords = /(投流|投手|信息流|优化师|买量|roi|cpm|ctr|cvr|消耗|投放)/.test(corpus);
+  const hasContentKeywords = /(编导|剪辑|短视频|脚本|拍摄|pr|ae|剪映|达芬奇|内容策划|素材)/.test(corpus);
+
+  if (hasTrafficKeywords) {
+    blocks.push(`【该岗位基础问题池：信息流/投手方向】
+- 必问“五维数据链”：消耗、CPM、CTR、CVR、ROI，要求候选人还原一条真实计划的数据区间，并解释这些指标之间的逻辑闭环。
+- 必问异常排查：当消耗涨了但 ROI 掉到 1 以下时，如何按五维数据链拆解原因，优先排查素材、人群、出价还是转化承接。
+- 必问素材与人群匹配：跑量最好的素材框架是什么，前3秒怎么抓人，核心人群包画像是什么，为什么这个素材能打中这群人。
+- 必问跨部门协同：和内容组、设计组、直播组或产品组在跑量不佳时如何复盘，谁主导修改，如何用数据说服对方。
+- 必问组织架构：团队人数、直接汇报对象、是否真正带人、如何定 KPI、是否能主导预算与策略。`);
+  }
+
+  if (hasContentKeywords) {
+    blocks.push(`【该岗位基础问题池：短视频编导/剪辑方向】
+- 必问内容基因：过去主要产出的是信息流效果短视频、自然流种草、IP人设包装还是品牌TVC，避免形式基因错配。
+- 必问个人技能栈：脚本、拍摄、打光、收音、剪辑、包装分别哪些是亲手独立完成的，熟练使用哪些器材和软件（PR / AE / 剪映 / 达芬奇）。
+- 必问爆款拆解：挑一条真实跑出来的视频，还原选题、前三秒钩子、信息密度、节奏设计、转化动作和复盘动作。
+- 必问协同与修改：当投流反馈跑不动时，如何根据数据修改脚本、镜头、节奏和卖点，而不是只做被动执行。`);
+  }
+
+  if (!blocks.length) {
+    blocks.push(`【该岗位基础问题池：通用业务岗位】
+- 必问过去项目中最能代表其真实能力的案例，拆解目标、动作、结果、复盘。
+- 必问组织架构、汇报线、带人情况、协同对象，判断其真实生态位。
+- 必问失败案例与复盘，观察其归因方式、情绪稳定性与学习能力。`);
+  }
+
+  return blocks.join("\n\n");
+};
+
+const buildCandidateBiasPrompt = cand => {
+  const resume = String(cand?.resume || "");
+  const text = resume.toLowerCase();
+  const hits = [];
+
+  if (/(主管|负责人|组长|leader|带团队|管理|汇报|kpi|考核|招聘|培养)/i.test(resume)) {
+    hits.push(`【候选人特征：管理/组织生态位】
+- 追加追问组织架构、真实带人规模、直接汇报关系、KPI制定方式、是否真正主导资源分配。
+- 对所有“主管/负责人/总监”类 title 保持审慎，优先通过具体管理动作核验，而不是相信头衔。`);
+  }
+
+  if (/(投流|投放|信息流|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/.test(text)) {
+    hits.push(`【候选人特征：投流/效果广告经历明显】
+- 专业题优先围绕“五维数据链”、计划诊断、素材与人群适配、异常排查 SOP。
+- 必须至少有1题让他还原真实计划的数据区间，至少有1题让他解释 ROI 下滑时的排查顺序。`);
+  }
+
+  if (/(编导|剪辑|脚本|拍摄|pr|ae|剪映|达芬奇|镜头|选题|前三秒|素材)/.test(text)) {
+    hits.push(`【候选人特征：内容/编导经历明显】
+- 专业题优先围绕内容基因、选题、前三秒、节奏设计、脚本、拍摄与后期的真实个人技能栈。
+- 必须至少有1题逼他拆解一条真实内容作品，而不是泛泛谈方法论。`);
+  }
+
+  if (/(跨部门|协同|对接|产品|设计|直播|运营|销售|商务)/.test(text)) {
+    hits.push(`【候选人特征：跨部门协同经历明显】
+- 行为题要重点考察他如何在内容组、投放组、产品组之间推进协同，尤其是目标冲突和复盘分歧时的处理方式。`);
+  }
+
+  if (/(\d{4}\.\d{1,2}|\d{4}-\d{1,2}|\d{4}\/\d{1,2})/.test(resume) || /(年以上|多年|资深|高级)/.test(resume)) {
+    hits.push(`【候选人特征：年资较深/可能较会包装】
+- 至少安排1道对抗性压力测试题，直接质疑其经验深度、平台适配、薪资匹配或跳槽稳定性，观察其被质疑后的反应。`);
+  }
+
+  if (!hits.length) {
+    hits.push(`【候选人特征：信息不足】
+- 优先用组织架构、代表项目、失败案例、跨团队协同和复盘能力来判断其真实水平。`);
+  }
+
+  return hits.join("\n\n");
+};
+
+const getInterviewRulesText = job => {
+  const custom = String(job?.interviewRules || "").trim();
+  return custom || INTERVIEW_RULES_PROMPT;
+};
+
 const buildQuestionPrompt = (job, cand, knowledge) => {
   const rubricCtx = formatRubricContext(knowledge);
   const bankCtx = formatQuestionBankContext(knowledge);
+  const roleBaselineCtx = buildRoleBaselinePrompt(job, cand);
+  const candidateBiasCtx = buildCandidateBiasPrompt(cand);
+  const interviewRules = getInterviewRulesText(job);
   return `岗位：${job?.title} 要求：${job?.requirements}
 简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
 风险：${JSON.stringify(cand.screening?.risks||[])}
-${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}生成10道结构化面试题，返回JSON：
-{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
+${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${interviewRules}
+${roleBaselineCtx}
+${candidateBiasCtx}
+生成10道结构化面试题，返回JSON：
+{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","principle":"命中的准则名称","resumeEvidence":"对应简历锚点","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
 步骤：1.开场破冰 2.自我介绍 3.离职动机 4.行为面试STAR(4-5题) 5.专业题(2题) 6.反问
 要求：
 1. 优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。
 2. 必须返回合法 JSON，只能有一个顶层对象，顶层键名固定为 questions。
-3. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
-4. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
+3. 每道题都要明确写出它命中的准则（principle）和对应的简历锚点（resumeEvidence）。
+4. 所有问题必须指向候选人的真实过往案例，默认使用“请回忆一次你过去...” “你当时具体怎么做的...” 这样的问法。
+5. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
+6. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
 };
 
 const normalizeQuestionsPayload = payload => {
@@ -363,6 +458,31 @@ const normalizeQuestionsPayload = payload => {
   if (Array.isArray(payload?.data?.questions)) return payload.data.questions;
   if (Array.isArray(payload?.result?.questions)) return payload.result.questions;
   return [];
+};
+
+const QUESTION_FEEDBACK_OPTIONS = [
+  { id: "high_value", label: "高价值", color: "#059669", bg: "#ecfdf5" },
+  { id: "normal", label: "一般", color: "#2563eb", bg: "#eff6ff" },
+  { id: "duplicate", label: "重复", color: "#d97706", bg: "#fffbeb" },
+  { id: "invalid", label: "无效", color: "#dc2626", bg: "#fef2f2" },
+];
+
+const summarizeQuestionFeedback = questions => {
+  const rated = (questions || []).filter(q => q?.feedbackTag);
+  if (!rated.length) return "";
+  const counts = QUESTION_FEEDBACK_OPTIONS.map(option => {
+    const total = rated.filter(q => q.feedbackTag === option.id).length;
+    return total ? `${option.label}${total}题` : "";
+  }).filter(Boolean);
+  const highlights = rated
+    .filter(q => q.feedbackTag === "high_value")
+    .slice(0, 3)
+    .map(q => q.question)
+    .filter(Boolean);
+  return [
+    counts.length ? `题目反馈统计：${counts.join("，")}` : "",
+    highlights.length ? `高价值题目：${highlights.join("；")}` : "",
+  ].filter(Boolean).join("\n");
 };
 
 const summarizeInterviews = cand => (cand.interviews||[])
@@ -384,6 +504,7 @@ const buildLearningSample = (cand, job, verdict, reason) => {
       : "corrective";
   const deltaNotes = [
     cand.screening?.risks?.length ? `筛选风险：${cand.screening.risks.join("；")}` : "",
+    summarizeQuestionFeedback(cand.questions || []),
     summarizeInterviews(cand),
   ].filter(Boolean).join("\n");
   return {
@@ -396,6 +517,7 @@ const buildLearningSample = (cand, job, verdict, reason) => {
     directorVerdict,
     directorReason: reason,
     screeningSummary: cand.screening?.summary || "",
+    questionFeedbackSummary: summarizeQuestionFeedback(cand.questions || []),
     interviewSummary: summarizeInterviews(cand),
     mismatchType,
     deltaNotes,
@@ -422,6 +544,7 @@ ${samples.map((sample, index) => `样本${index+1}：
 - 总监原因：${sample.directorReason||"无"}
 - 简历总结：${sample.screeningSummary||"无"}
 - 面试摘要：${sample.interviewSummary||"无"}
+- 题目反馈：${sample.questionFeedbackSummary||"无"}
 - 偏差类型：${sample.mismatchType||"无"}
 - 备注：${sample.deltaNotes||"无"}`).join("\n\n")}
 输出JSON：
@@ -1344,6 +1467,8 @@ const FunnelBar=({label,rate,highlight})=>(
 // ─── JOBS VIEW ───────────────────────────────────────────────
 function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jobComposer,setJobComposer,resetJobComposer,applyParsedJobToComposer,startJobFileParse}) {
   const [jdDrag,setJdDrag]=useState(false);
+  const [interviewRulesDraft,setInterviewRulesDraft]=useState("");
+  const [rulesSaved,setRulesSaved]=useState(false);
   const { open, form, jdFileName, jdLoading, jdErr, parsedJobs, activeParsedJob } = jobComposer;
   const ff=k=>e=>setJobComposer(prev=>({...prev,form:{...prev.form,[k]:e.target.value}}));
 
@@ -1355,16 +1480,20 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
   const onJdDrop=e=>{e.preventDefault();setJdDrag(false);const f=e.dataTransfer.files?.[0];if(f)startJobFileParse(f);};
   const saveJob=()=>{
     if(!form.title||!form.requirements)return;
-    const j={...form,id:Date.now()};
+    const j={...form,interviewRules:"",id:Date.now()};
     setJobs(p=>[...p,j]);setSelJob(j.id);
     resetCreateForm();
   };
   const delJob=id=>{if(window.confirm("确认删除该岗位及所有候选人？")){setJobs(p=>p.filter(j=>j.id!==id));setCands(p=>p.filter(c=>c.jobId!==id));if(selJob===id)setSelJob(null);}};
   const job=jobs.find(j=>j.id===selJob);
   const jobCands=cands.filter(c=>c.jobId===selJob);
+  useEffect(()=>{
+    setInterviewRulesDraft(job?.interviewRules || "");
+    setRulesSaved(false);
+  },[job?.id, job?.interviewRules]);
   const importParsedJobs=()=>{
     if(!parsedJobs.length) return;
-    const created=parsedJobs.map(job=>({...job,id:Date.now()+Math.floor(Math.random()*1000000)}));
+    const created=parsedJobs.map(job=>({...job,id:Date.now()+Math.floor(Math.random()*1000000),interviewRules:job.interviewRules||""}));
     setJobs(p=>[...p,...created]);
     setSelJob(created[0]?.id||null);
     resetCreateForm();
@@ -1373,6 +1502,12 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
     const id=Date.now();
     setCands(p=>[...p,{id,jobId:selJob,name:"",status:"pending",resume:"",screening:null,questions:null,interviews:[],scheduledAt:null,interviewRound:null,directorVerdict:null}]);
     onCandClick(id,selJob);
+  };
+  const saveInterviewRules=()=>{
+    if(!job) return;
+    setJobs(prev=>prev.map(item=>item.id===job.id?{...item,interviewRules:interviewRulesDraft.trim()}:item));
+    setRulesSaved(true);
+    setTimeout(()=>setRulesSaved(false),1500);
   };
   return(<Page T={T} title="岗位管理" sub="创建和管理在招职位">
     <div style={{display:"grid",gridTemplateColumns:"260px 1fr",gap:20}}>
@@ -1480,6 +1615,29 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
             <button onClick={addCand} style={{padding:"9px 18px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 添加候选人</button>
           </div>
           {job.requirements&&<div style={{fontSize:13,color:T.text2,lineHeight:1.7,padding:"10px 14px",background:T.card2,borderRadius:8}}>{job.requirements}</div>}
+        </div>
+        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 22px",marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:800,color:T.text}}>岗位级面试准则模板</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>这里写的内容会直接并入“生成面试题”的 prompt。不同岗位可以维护不同的面试策略。</div>
+            </div>
+            {rulesSaved&&<Chip c="#059669" bg="#ecfdf5">已保存</Chip>}
+          </div>
+          <textarea
+            rows={10}
+            value={interviewRulesDraft}
+            onChange={e=>setInterviewRulesDraft(e.target.value)}
+            style={{...inSt(T),resize:"vertical",lineHeight:1.7,marginBottom:12}}
+            placeholder={INTERVIEW_RULES_PROMPT}
+          />
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:12,color:T.text4,lineHeight:1.7}}>留空时自动使用系统默认准则；填了以后，这个岗位会优先用你自定义的版本。</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>setInterviewRulesDraft(INTERVIEW_RULES_PROMPT)} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:8,color:T.text3,cursor:"pointer",fontSize:12,fontWeight:700}}>套用默认准则</button>
+              <button onClick={saveInterviewRules} style={{padding:"8px 14px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>保存到当前岗位</button>
+            </div>
+          </div>
         </div>
         <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 22px"}}>
           <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:14}}>候选人 ({jobCands.length})</div>
@@ -1890,6 +2048,10 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
 function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState}) {
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
+  const updateQuestionFeedback=(index,patch)=>{
+    const next=(cand.questions||[]).map((item,i)=>i===index?{...item,...patch}:item);
+    updCand(cand.id,{questions:next});
+  };
   const gen=async()=>{
     setErr("");setLoading(true);
     try{
@@ -1897,7 +2059,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
         `你是资深HR面试官，请严格按JSON格式输出，不含任何markdown标记。`,
         buildQuestionPrompt(job, cand, learning),
         recordTokens,dirCtx,
-        {maxTokens:2600}
+        {maxTokens:3000}
       );
       if(res.error) throw new Error(res.raw||res.error);
       const questions=normalizeQuestionsPayload(res);
@@ -1916,24 +2078,33 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       {err&&<ErrBox>{err}</ErrBox>}
       <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
     </SCard>):(<div>
+      <div style={{fontSize:12,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>
+        面试后可直接给每道题打标：高价值 / 一般 / 重复 / 无效。系统后续会把这些反馈沉淀进岗位题库学习。
+      </div>
       {[...new Set(qs.map(q=>q.step))].sort().map(step=>{
-        const sq=qs.filter(q=>q.step===step);
+        const sq=qs.map((q,index)=>({q,index})).filter(item=>item.q.step===step);
         return(<div key={step} style={{marginBottom:18}}>
-          <div style={{fontSize:12,fontWeight:700,color:T.text2,padding:"6px 12px",background:T.navActive,borderRadius:6,marginBottom:9,borderLeft:`3px solid ${T.accent}`}}>第{step}步 · {sq[0]?.stepName}</div>
-          {sq.map((q,i)=><QCard key={i} T={T} q={q}/>)}
+          <div style={{fontSize:12,fontWeight:700,color:T.text2,padding:"6px 12px",background:T.navActive,borderRadius:6,marginBottom:9,borderLeft:`3px solid ${T.accent}`}}>第{step}步 · {sq[0]?.q?.stepName}</div>
+          {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
         </div>);
       })}
       <button onClick={()=>updCand(cand.id,{questions:null})} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
     </div>)}
   </div>);
 }
-function QCard({T,q}) {
+function QCard({T,q,onFeedbackChange}) {
   const [open,setOpen]=useState(false);
   return(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:14,marginBottom:9}}>
     <div style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}} onClick={()=>setOpen(!open)}>
       <div style={{flex:1,marginRight:10}}>
-        <div style={{display:"flex",gap:5,marginBottom:6}}><Chip c={T.text2} bg={T.navActive}>{q.tag}</Chip>{q.subTag&&<Chip c={T.text3} bg={T.card2}>{q.subTag}</Chip>}</div>
+        <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
+          <Chip c={T.text2} bg={T.navActive}>{q.tag}</Chip>
+          {q.subTag&&<Chip c={T.text3} bg={T.card2}>{q.subTag}</Chip>}
+          {q.principle&&<Chip c="#7c3aed" bg="#f3e8ff">{q.principle}</Chip>}
+          {q.feedbackTag&&<Chip c={q.feedbackTag==="高价值"?"#166534":q.feedbackTag==="重复"?"#9a3412":q.feedbackTag==="无效"?"#991b1b":"#334155"} bg={q.feedbackTag==="高价值"?"#dcfce7":q.feedbackTag==="重复"?"#ffedd5":q.feedbackTag==="无效"?"#fee2e2":"#e2e8f0"}>{q.feedbackTag}</Chip>}
+        </div>
         <div style={{fontSize:14,color:T.text,fontWeight:500,lineHeight:1.5}}>{q.question}</div>
+        {q.resumeEvidence&&<div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>简历锚点：{q.resumeEvidence}</div>}
       </div>
       <span style={{fontSize:11,color:T.text4,flexShrink:0}}>{open?"▲":"▼"}</span>
     </div>
@@ -1941,6 +2112,44 @@ function QCard({T,q}) {
       {[["考察目标","#374151","#f9fafb",q.purpose],["好的回答","#16a34a","#f0fdf4",q.goodAnswer],["一般回答","#ca8a04","#fefce8",q.okAnswer],["差的回答","#dc2626","#fff5f5",q.badAnswer],q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],["追问方向","#4f46e5","#eef2ff",q.followUp]].filter(Boolean).map(([l,c,bg,t])=>(
         <div key={l} style={{padding:"7px 9px",borderRadius:6,background:bg,marginBottom:7}}><span style={{fontSize:10,fontWeight:700,color:c,marginRight:5}}>{l}</span><span style={{fontSize:13,color:"#374151",lineHeight:1.6}}>{t}</span></div>
       ))}
+      <div style={{marginTop:12,paddingTop:12,borderTop:`1px dashed ${T.border}`}}>
+        <div style={{fontSize:11,fontWeight:700,color:T.text2,marginBottom:8}}>题目质量反馈</div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+          {QUESTION_FEEDBACK_OPTIONS.map(option=>(
+            <button
+              key={option.id}
+              type="button"
+              onClick={()=>onFeedbackChange?.({feedbackTag:option.id})}
+              style={{
+                padding:"6px 10px",
+                borderRadius:999,
+                border:`1px solid ${q.feedbackTag===option.id?option.color:T.border2}`,
+                background:q.feedbackTag===option.id?option.bg:T.surface,
+                color:q.feedbackTag===option.id?option.color:T.text3,
+                fontSize:11,
+                fontWeight:700,
+                cursor:"pointer"
+              }}
+            >
+              {option.id}
+            </button>
+          ))}
+          {q.feedbackTag&&<button
+            type="button"
+            onClick={()=>onFeedbackChange?.({feedbackTag:"",feedbackNote:""})}
+            style={{padding:"6px 10px",borderRadius:999,border:`1px solid ${T.border2}`,background:"transparent",color:T.text4,fontSize:11,cursor:"pointer"}}
+          >
+            清除
+          </button>}
+        </div>
+        <textarea
+          rows={3}
+          value={q.feedbackNote||""}
+          onChange={e=>onFeedbackChange?.({feedbackNote:e.target.value})}
+          style={{...inSt(T),resize:"vertical",lineHeight:1.6,fontSize:12}}
+          placeholder="记录这道题为什么有效、重复，或需要怎样优化问法..."
+        />
+      </div>
     </div>}
   </div>);
 }
