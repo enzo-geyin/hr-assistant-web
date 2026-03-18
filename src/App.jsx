@@ -858,6 +858,7 @@ export default function App() {
   const [cands,setCands]=useState(()=>load("hr_cands",[]));
   const [usageLogs,setUsageLogs]=useState(()=>load("hr_usage",[]));
   const [jobComposer,setJobComposer]=useState(EMPTY_JOB_COMPOSER);
+  const [questionTasks,setQuestionTasks]=useState({});
   const [view,setView] =useState("dashboard");
   const [selJob,setSelJob]=useState(null);
   const [selCand,setSelCand]=useState(null);
@@ -946,6 +947,49 @@ export default function App() {
     }));
   };
   const resetJobComposer=()=>setJobComposer(EMPTY_JOB_COMPOSER());
+  const startQuestionGeneration=async(candidate,job,learning)=>{
+    if(!candidate?.id) return;
+    const taskId=`question-${candidate.id}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    setQuestionTasks(prev=>({
+      ...prev,
+      [candidate.id]:{
+        loading:true,
+        error:"",
+        taskId,
+        startedAt:Date.now(),
+      },
+    }));
+    try{
+      const res=await callAI(
+        cfg,
+        `你是资深HR面试官，请严格按JSON格式输出，不含任何markdown标记。`,
+        buildQuestionPrompt(job, candidate, learning),
+        recordTokens,dirCtx,
+        {maxTokens:3000}
+      );
+      if(res.error) throw new Error(res.raw||res.error);
+      const questions=normalizeQuestionsPayload(res);
+      if(!questions.length) throw new Error("模型已返回内容，但没有识别到有效的面试题列表");
+      updCand(candidate.id,{questions});
+      setQuestionTasks(prev=>{
+        if(prev[candidate.id]?.taskId!==taskId) return prev;
+        const next={...prev};
+        delete next[candidate.id];
+        return next;
+      });
+    }catch(error){
+      setQuestionTasks(prev=>prev[candidate.id]?.taskId!==taskId?prev:{
+        ...prev,
+        [candidate.id]:{
+          loading:false,
+          error:error?.message||"面试题生成失败",
+          taskId,
+          startedAt:prev[candidate.id]?.startedAt||Date.now(),
+          finishedAt:Date.now(),
+        },
+      });
+    }
+  };
   const startJobFileParse=async file=>{
     if(!file) return;
     const taskId=`job-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
@@ -992,6 +1036,7 @@ export default function App() {
 
   const upcoming=cands.filter(c=>isSoon(c.scheduledAt)).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
   const dirDone=cands.filter(c=>c.directorVerdict?.verdict);
+  const hasQuestionTaskRunning=Object.values(questionTasks).some(task=>task?.loading);
   const dirMatch=dirDone.filter(c=>{
     const aiRec=c.screening?.recommendation||"";
     const dir=c.directorVerdict.verdict;
@@ -1026,6 +1071,7 @@ export default function App() {
               {n.id==="settings"&&!Object.values(cfg.apiKeys||{}).some(Boolean)&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
               {n.id==="jobs"&&jobComposer.jdLoading&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>识别中</span>}
+              {n.id==="candidates"&&hasQuestionTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#7c3aed",color:"#fff",borderRadius:10}}>题目中</span>}
             </button>
           ))}
           {compared.length>=2&&(
@@ -1061,7 +1107,7 @@ export default function App() {
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} startQuestionGeneration={startQuestionGeneration}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
     </div>
@@ -1665,7 +1711,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare}) {
+function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,startQuestionGeneration}) {
   const cand=cands.find(c=>c.id===selCand);
   const job=jobs.find(j=>j.id===cand?.jobId);
   const [showImport,setShowImport]=useState(false);
@@ -1698,12 +1744,13 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
                 <Av name={c.name} T={T} size={30}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
-                  <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未知岗位"}</div>
-                </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <SBadge status={c.status}/>
-                  {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
-                </div>
+                <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未知岗位"}</div>
+                {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <SBadge status={c.status}/>
+                {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
+              </div>
               </div>
               {c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26}}>📅 {fmtDate(c.scheduledAt)}</div>}
               {c.directorVerdict?.verdict&&<div style={{fontSize:10,marginTop:3,marginLeft:26,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
@@ -1711,7 +1758,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
@@ -1817,7 +1864,7 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
-function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
+function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const refreshLearning=async()=>{
@@ -1844,7 +1891,7 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
 
   const tabs=[
     {id:"screening",label:"① 简历筛选"},
-    {id:"questions",label:"② 面试题",disabled:!cand.screening},
+    {id:"questions",label:`② 面试题${questionTask?.loading?" · 生成中":""}`,disabled:!cand.screening},
     {id:"interview",label:"③ 面试记录",disabled:!cand.screening},
     {id:"director", label:"④ 总监判断"},
     {id:"result",   label:"⑤ 评估结果",disabled:!cand.interviews?.some(i=>i.assessment)},
@@ -1875,7 +1922,7 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx}) {
         disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
-    {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
+    {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
     {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>}
     {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
     {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
@@ -2045,28 +2092,15 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
 }
 
 // ─── QUESTION TAB ────────────────────────────────────────────
-function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState}) {
-  const [loading,setLoading]=useState(false);
-  const [err,setErr]=useState("");
+function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState,questionTask,startQuestionGeneration}) {
+  const loading=!!questionTask?.loading;
+  const err=questionTask?.error||"";
   const updateQuestionFeedback=(index,patch)=>{
     const next=(cand.questions||[]).map((item,i)=>i===index?{...item,...patch}:item);
     updCand(cand.id,{questions:next});
   };
   const gen=async()=>{
-    setErr("");setLoading(true);
-    try{
-      const res=await callAI(cfg,
-        `你是资深HR面试官，请严格按JSON格式输出，不含任何markdown标记。`,
-        buildQuestionPrompt(job, cand, learning),
-        recordTokens,dirCtx,
-        {maxTokens:3000}
-      );
-      if(res.error) throw new Error(res.raw||res.error);
-      const questions=normalizeQuestionsPayload(res);
-      if(!questions.length) throw new Error("模型已返回内容，但没有识别到有效的面试题列表");
-      updCand(cand.id,{questions});
-    }catch(e){setErr(e.message);}
-    setLoading(false);
+    startQuestionGeneration?.(cand,job,learning);
   };
   const qs=cand.questions;
   return(<div>
@@ -2075,9 +2109,11 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入总监历史判断标准，面试题将更贴近你的用人偏好</div>}
       {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位最新规则与题库，当前先按岗位要求生成面试题</div>}
       {!learningState?.loading&&formatQuestionBankContext(learning)&&<div style={{fontSize:11,color:"#0f766e",marginBottom:10,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载学习后的题库偏好，面试题会优先覆盖高区分度问题和风险排查</div>}
+      {loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:10,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 面试题正在后台生成中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
       {err&&<ErrBox>{err}</ErrBox>}
       <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
     </SCard>):(<div>
+      {questionTask?.loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:12,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 正在后台重新生成面试题。你切换页面后任务仍会继续。</div>}
       <div style={{fontSize:12,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>
         面试后可直接给每道题打标：高价值 / 一般 / 重复 / 无效。系统后续会把这些反馈沉淀进岗位题库学习。
       </div>
