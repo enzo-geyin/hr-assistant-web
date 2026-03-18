@@ -466,6 +466,7 @@ const QUESTION_FEEDBACK_OPTIONS = [
   { id: "duplicate", label: "重复", color: "#d97706", bg: "#fffbeb" },
   { id: "invalid", label: "无效", color: "#dc2626", bg: "#fef2f2" },
 ];
+const getQuestionFeedbackOption = id => QUESTION_FEEDBACK_OPTIONS.find(option => option.id === id) || null;
 
 const summarizeQuestionFeedback = questions => {
   const rated = (questions || []).filter(q => q?.feedbackTag);
@@ -2130,6 +2131,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
 }
 function QCard({T,q,onFeedbackChange}) {
   const [open,setOpen]=useState(false);
+  const feedbackOption = getQuestionFeedbackOption(q.feedbackTag);
   return(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:14,marginBottom:9}}>
     <div style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}} onClick={()=>setOpen(!open)}>
       <div style={{flex:1,marginRight:10}}>
@@ -2137,7 +2139,7 @@ function QCard({T,q,onFeedbackChange}) {
           <Chip c={T.text2} bg={T.navActive}>{q.tag}</Chip>
           {q.subTag&&<Chip c={T.text3} bg={T.card2}>{q.subTag}</Chip>}
           {q.principle&&<Chip c="#7c3aed" bg="#f3e8ff">{q.principle}</Chip>}
-          {q.feedbackTag&&<Chip c={q.feedbackTag==="高价值"?"#166534":q.feedbackTag==="重复"?"#9a3412":q.feedbackTag==="无效"?"#991b1b":"#334155"} bg={q.feedbackTag==="高价值"?"#dcfce7":q.feedbackTag==="重复"?"#ffedd5":q.feedbackTag==="无效"?"#fee2e2":"#e2e8f0"}>{q.feedbackTag}</Chip>}
+          {feedbackOption&&<Chip c={feedbackOption.color} bg={feedbackOption.bg}>{feedbackOption.label}</Chip>}
         </div>
         <div style={{fontSize:14,color:T.text,fontWeight:500,lineHeight:1.5}}>{q.question}</div>
         {q.resumeEvidence&&<div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>简历锚点：{q.resumeEvidence}</div>}
@@ -2167,7 +2169,7 @@ function QCard({T,q,onFeedbackChange}) {
                 cursor:"pointer"
               }}
             >
-              {option.id}
+              {option.label}
             </button>
           ))}
           {q.feedbackTag&&<button
