@@ -2632,6 +2632,79 @@ function QuestionBankPanel({T,learning}) {
   );
 }
 
+const getAiVerdictTone = recommendation => {
+  if (!recommendation) return "unknown";
+  if (/(通过|录用)/.test(recommendation)) return "positive";
+  if (/淘汰/.test(recommendation)) return "negative";
+  return "neutral";
+};
+
+const getHumanVerdictTone = verdict => {
+  if (!verdict) return "unknown";
+  if (["录用","通过"].includes(verdict)) return "positive";
+  if (verdict === "淘汰") return "negative";
+  return "neutral";
+};
+
+const buildVerdictGapAnalysis = cand => {
+  const aiRec = cand.screening?.recommendation || "";
+  const humanVerdict = cand.directorVerdict?.verdict || "";
+  if (!aiRec || !humanVerdict) return null;
+
+  const aiTone = getAiVerdictTone(aiRec);
+  const humanTone = getHumanVerdictTone(humanVerdict);
+  const same = aiTone === humanTone && aiTone !== "unknown";
+  const latest = (cand.interviews || []).filter(i => i.assessment).slice(-1)[0]?.assessment || {};
+  const riskLines = Array.isArray(cand.screening?.risks) ? cand.screening.risks.slice(0, 3) : [];
+  const concernLines = Array.isArray(latest.concerns) ? latest.concerns.slice(0, 3) : [];
+  const highlightLines = Array.isArray(latest.highlights) ? latest.highlights.slice(0, 3) : [];
+  const mismatchDims = Array.isArray(latest.dimensions)
+    ? latest.dimensions
+        .filter(d => ["存疑", "不符"].includes(d?.vsResume))
+        .slice(0, 3)
+        .map(d => `${d.name}：${d.vsResume}${d.evidence ? `（${d.evidence}）` : ""}`)
+    : [];
+  const strongDims = Array.isArray(latest.dimensions)
+    ? latest.dimensions
+        .filter(d => Number(d?.score) >= 4 && d?.name)
+        .slice(0, 3)
+        .map(d => `${d.name}${d.evidence ? `（${d.evidence}）` : ""}`)
+    : [];
+
+  if (same) {
+    return {
+      same: true,
+      title: "判断一致",
+      summary: "AI 录用建议与面试官/总监最终判断一致，本次主要用于沉淀判断依据。",
+      reasons: [
+        concernLines.length ? `人工顾虑：${concernLines.join("；")}` : "",
+        highlightLines.length ? `现场亮点：${highlightLines.join("；")}` : "",
+        cand.directorVerdict?.reason ? `最终判断依据：${cand.directorVerdict.reason}` : "",
+      ].filter(Boolean),
+    };
+  }
+
+  const summary = aiTone === "positive" && humanTone !== "positive"
+    ? "AI 给出了偏乐观的录用建议，但面试官/总监在真实面试里发现了更关键的风险。"
+    : aiTone === "negative" && humanTone === "positive"
+      ? "AI 判断偏保守，但面试官/总监结合现场表现和补充事实，认为候选人仍值得推进。"
+      : "AI 建议与面试官/总监最终判断存在分歧，需要回看真实面试证据。";
+
+  return {
+    same: false,
+    title: "判断不一致",
+    summary,
+    reasons: [
+      mismatchDims.length ? `现场核验出的差异点：${mismatchDims.join("；")}` : "",
+      concernLines.length ? `人工顾虑：${concernLines.join("；")}` : "",
+      highlightLines.length ? `人工补充看到的亮点：${highlightLines.join("；")}` : "",
+      strongDims.length && aiTone === "negative" && humanTone === "positive" ? `被人工加权的强项：${strongDims.join("；")}` : "",
+      riskLines.length ? `AI 初筛主要关注：${riskLines.join("；")}` : "",
+      cand.directorVerdict?.reason ? `最终判断依据：${cand.directorVerdict.reason}` : "",
+    ].filter(Boolean),
+  };
+};
+
 // ─── DIRECTOR TAB ────────────────────────────────────────────
 function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState,refreshLearning}) {
   const dir=cand.directorVerdict||{};
@@ -2641,7 +2714,8 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
   const [learningMsg,setLearningMsg]=useState("");
   const saved=dir.verdict&&dir.reason;
   const aiRec=cand.screening?.recommendation;
-  const match=saved&&((aiRec==="建议通过"&&["录用","通过"].includes(dir.verdict))||(aiRec==="建议淘汰"&&dir.verdict==="淘汰"));
+  const gapAnalysis=saved?buildVerdictGapAnalysis(cand):null;
+  const match=!!gapAnalysis?.same;
 
   const save=async()=>{
     if(!verdict||!reason.trim())return;
@@ -2693,26 +2767,33 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
 
     {cand.screening&&(
       <div style={{...cardSt(T),marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>AI 建议 vs 总监判断</div>
+        <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>AI 录用建议 vs 最终结果（以面试官/总监为准）</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
           <div style={{padding:"14px",background:T.card2,borderRadius:9,textAlign:"center"}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 建议</div>
+            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
             <div style={{fontSize:16,fontWeight:700,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
             <div style={{fontSize:28,fontWeight:900,color:scColor(cand.screening.overallScore),marginTop:4}}>{cand.screening.overallScore?.toFixed(1)}</div>
           </div>
           <div style={{padding:"14px",background:T.card2,borderRadius:9,textAlign:"center",border:saved?`2px solid ${verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}`:undefined}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>总监最终判断</div>
+            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
             {saved?<div style={{fontSize:16,fontWeight:700,color:verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}}>{verdict}</div>
             :<div style={{fontSize:13,color:T.text4}}>待填写</div>}
-            {saved&&aiRec&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 与AI一致":"✗ 与AI不同，将修正AI标准"}</div>}
+            {saved&&aiRec&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 人工判断与AI建议一致":"✗ 以人工判断为准，并记录AI分歧原因"}</div>}
           </div>
         </div>
+        {gapAnalysis&&<div style={{marginTop:12,padding:"10px 12px",background:match?"#f0fdf4":"#fff7ed",borderRadius:8,borderLeft:`3px solid ${match?"#16a34a":"#ea580c"}`,fontSize:12,color:T.text2,lineHeight:1.8}}>
+          <strong style={{color:match?"#166534":"#9a3412"}}>{gapAnalysis.title}</strong>
+          <div style={{marginTop:4}}>{gapAnalysis.summary}</div>
+          {gapAnalysis.reasons?.length>0&&<div style={{marginTop:8,display:"grid",gap:6}}>
+            {gapAnalysis.reasons.map((item,index)=><div key={index}>• {item}</div>)}
+          </div>}
+        </div>}
       </div>
     )}
 
     <SCard T={T} title={saved?"更新我的判断":"填写我的判断"}>
       <div style={{marginBottom:14}}>
-        <label style={lbSt(T)}>最终决定</label>
+        <label style={lbSt(T)}>最终决定（以面试官/总监判断为准）</label>
         <div style={{display:"flex",gap:10}}>
           {[["录用","#059669","#ecfdf5"],["通过","#2563eb","#eff6ff"],["待定","#ca8a04","#fef9c3"],["淘汰","#dc2626","#fef2f2"]].map(([v,c,bg])=>(
             <div key={v} onClick={()=>setVerdict(v)}
@@ -2749,19 +2830,45 @@ function ResultTab({T,cand}) {
   if(!ivs.length) return <Empty T={T} icon="◎" title="暂无评估结果" sub="完成面试记录并进行AI评估后显示"/>;
   const lat=ivs[ivs.length-1];
   const allOk=ivs.every(i=>i.assessment?.decision==="通过");
-  const rec=allOk?"建议录用":lat.assessment?.decision==="待定"?"待最终确认":"建议淘汰";
-  const rs2=allOk?{c:"#16a34a",bg:"#dcfce7"}:rec==="待最终确认"?{c:"#ca8a04",bg:"#fef9c3"}:{c:"#dc2626",bg:"#fee2e2"};
+  const aiRec=allOk?"建议录用":lat.assessment?.decision==="待定"?"待最终确认":"建议淘汰";
+  const aiTone=getAiVerdictTone(aiRec);
+  const aiChip=aiTone==="positive"?{c:"#16a34a",bg:"#dcfce7"}:aiTone==="negative"?{c:"#dc2626",bg:"#fee2e2"}:{c:"#ca8a04",bg:"#fef9c3"};
+  const humanVerdict=cand.directorVerdict?.verdict||"";
+  const humanTone=getHumanVerdictTone(humanVerdict);
+  const humanChip=humanTone==="positive"?{c:"#16a34a",bg:"#dcfce7"}:humanTone==="negative"?{c:"#dc2626",bg:"#fee2e2"}:humanTone==="neutral"?{c:"#ca8a04",bg:"#fef9c3"}:{c:T.text4,bg:T.card2};
+  const gapAnalysis=buildVerdictGapAnalysis({
+    ...cand,
+    screening:{...(cand.screening||{}),recommendation:aiRec}
+  });
   return(<div>
-    <div style={{...cardSt(T),borderLeft:`4px solid ${rs2.c}`,marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+    <div style={{...cardSt(T),borderLeft:`4px solid ${humanVerdict?humanChip.c:aiChip.c}`,marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>AI 综合录用建议</div>
-          <div style={{fontSize:13,color:T.text2}}>完成 {ivs.length} 轮面试 · 最终评分 <strong style={{color:scColor(lat.assessment.score)}}>{lat.assessment.score?.toFixed(1)}/5.0</strong></div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>评估结果总览</div>
+          <div style={{fontSize:13,color:T.text2}}>完成 {ivs.length} 轮面试 · AI 最终评分 <strong style={{color:scColor(lat.assessment.score)}}>{lat.assessment.score?.toFixed(1)}/5.0</strong></div>
           <div style={{fontSize:13,color:T.text3,marginTop:4}}>{lat.assessment.suggestion}</div>
         </div>
-        <Chip c={rs2.c} bg={rs2.bg} lg>{rec}</Chip>
+        <div style={{display:"grid",gap:8,justifyItems:"end"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,color:T.text4}}>AI 录用建议</span>
+            <Chip c={aiChip.c} bg={aiChip.bg} lg>{aiRec}</Chip>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,color:T.text4}}>最终结果（面试官/总监）</span>
+            <Chip c={humanVerdict?humanChip.c:T.text4} bg={humanVerdict?humanChip.bg:T.card2} lg>{humanVerdict||"待面试官/总监确认"}</Chip>
+          </div>
+        </div>
       </div>
     </div>
+    {gapAnalysis&&<div style={{...cardSt(T),marginBottom:14,borderLeft:`4px solid ${gapAnalysis.same?"#16a34a":"#ea580c"}`}}>
+      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:6}}>
+        {gapAnalysis.same?"AI 与人工判断一致":"AI 与人工判断不一致，需回看分歧原因"}
+      </div>
+      <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}>{gapAnalysis.summary}</div>
+      {gapAnalysis.reasons?.length>0&&<div style={{marginTop:8,display:"grid",gap:6}}>
+        {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2}}>• {item}</div>)}
+      </div>}
+    </div>}
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
       {ivs.map((ir,i)=>{
         const dc=ir.assessment.decision==="通过"?{c:"#16a34a",bg:"#dcfce7"}:ir.assessment.decision==="淘汰"?{c:"#dc2626",bg:"#fee2e2"}:{c:"#ca8a04",bg:"#fef9c3"};
