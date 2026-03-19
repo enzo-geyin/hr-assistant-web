@@ -321,9 +321,38 @@ const formatQuestionBankContext = knowledge => {
   return lines.join("\n");
 };
 
-const buildScreeningPrompt = (job, resume, learningCtx="") => {
+const buildJobOptionsContext = jobs => {
+  const items = (jobs || []).map(job => {
+    const lines = [
+      `- 岗位名称：${cleanListLine(job?.title || "")}`,
+      job?.department ? `  部门：${cleanListLine(job.department)}` : "",
+      job?.requirements ? `  岗位要求：${normalizeLooseListText(job.requirements).replace(/\n+/g, "；")}` : "",
+      job?.t0 ? `  T0：${normalizeLooseListText(job.t0).replace(/\n+/g, "；")}` : "",
+      job?.t1 ? `  T1：${normalizeLooseListText(job.t1).replace(/\n+/g, "；")}` : "",
+    ].filter(Boolean);
+    return lines.join("\n");
+  }).filter(Boolean);
+  return items.length ? `候选岗位列表：\n${items.join("\n")}` : "";
+};
+
+const resolveMatchedJob = (jobs, matchedTitle = "") => {
+  const target = cleanListLine(matchedTitle || "").toLowerCase();
+  if (!target) return null;
+  const exact = (jobs || []).find(job => cleanListLine(job?.title || "").toLowerCase() === target);
+  if (exact) return exact;
+  const fuzzy = (jobs || []).find(job => {
+    const title = cleanListLine(job?.title || "").toLowerCase();
+    return title && (title.includes(target) || target.includes(title));
+  });
+  return fuzzy || null;
+};
+
+const buildScreeningPrompt = (job, resume, learningCtx="", jobOptions=[]) => {
   const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
   const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
+  const genericJobMatching = !job?.title && !job?.requirements && jobOptions.length
+    ? `当前尚未指定岗位。请先在候选岗位列表里判断候选人最匹配哪个岗位；如果候选人与所有岗位都不匹配，matchedJobTitle 返回空字符串。若简历里明确出现“店铺运营 / 店铺店务 / 店铺管理 / 店铺电商运营 / 店铺后台运营 / 淘系店铺 / 快手店铺运营”等表述，要优先匹配店铺运营类岗位。`
+    : "";
   const genericHint = !job?.title && !job?.requirements
     ? "当前尚未指定岗位，请先把简历规整成结构化人才画像，再按通用互联网招聘标准完成首轮潜力评分。重点识别候选人的职业方向、经验年限、核心技能、行业相关性、稳定性与风险项。"
     : "";
@@ -331,9 +360,11 @@ const buildScreeningPrompt = (job, resume, learningCtx="") => {
 ${t0?`T0硬性条件：[${t0}]`:"请自行从要求中提取T0硬性条件"}
 ${t1?`T1核心维度：[${t1}]`:"请自行提取T1核心评估维度(6-8个)"}
 ${genericHint?`\n${genericHint}`:""}
+${genericJobMatching?`\n${genericJobMatching}`:""}
+${!job?.title && !job?.requirements && jobOptions.length?`\n${buildJobOptionsContext(jobOptions)}`:""}
 ${learningCtx?`\n${learningCtx}`:""}
 薪酬：${job?.salary||"不限"} 简历：${resume}
-输出JSON：{"candidateName":"候选人姓名（如能识别）","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
+输出JSON：{"candidateName":"候选人姓名（如能识别）","matchedJobTitle":"最匹配的岗位名称；若都不匹配则留空","matchedJobReason":"为什么匹配这个岗位，或为什么不匹配任何岗位","matchedJobConfidence":"高|中|低","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
 "t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
 "t1":{"items":[{"dimension":"维度","note":"依据","score":4,"maxScore":5}]},
 "t2":{"items":[{"item":"加分项","has":true,"note":"依据"}]},
@@ -747,7 +778,7 @@ async function callAIWithJobFile(cfg, file, onTokens) {
   );
 }
 
-async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "") {
+async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "", jobOptions = []) {
   const normalizedResume = normalizeExtractedText(resumeText).slice(0,30000);
   if (!normalizedResume) throw new Error("未能从简历文件中提取到有效文字，请换一个更清晰的文件");
 
@@ -759,7 +790,7 @@ async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "") {
   const screening = await callAI(
     cfg,
     "你是资深HR顾问，请严格按JSON格式输出，不含任何markdown标记或额外文字。",
-    buildScreeningPrompt(job, normalizedResume, formatRubricContext(learning)),
+    buildScreeningPrompt(job, normalizedResume, formatRubricContext(learning), jobOptions),
     onTokens,
     dirCtx,
     { maxTokens: 2200 }
@@ -768,14 +799,15 @@ async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "") {
   return { normalizedResume, screening, learning };
 }
 
-async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "" }) {
+async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [] }) {
   const extractedResume = await extractFileText(file);
-  const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx);
+  const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
+  const matchedJob = job || resolveMatchedJob(jobs, screening?.matchedJobTitle);
   const candidateName = name.trim() || screening.candidateName || "未命名";
   return {
     candidate: {
       id: Date.now() + Math.floor(Math.random() * 1000000),
-      jobId: job?.id ?? null,
+      jobId: matchedJob?.id ?? null,
       name: candidateName,
       status: getCandidateStatusFromScore(screening.overallScore),
       resume: normalizedResume,
@@ -1415,7 +1447,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
     const failedKeys=new Set();
     for(const file of files){
       try{
-        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx});
+        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs});
         created.push(candidate);
       }catch(error){
         failed.push(`${file.name}：${error?.message||"识别失败"}`);
