@@ -491,6 +491,16 @@ const normalizeQuestionsPayload = payload => {
   return [];
 };
 
+const normalizeInterviewAssessmentPayload = payload => {
+  const candidates = [payload, payload?.assessment, payload?.data, payload?.result, payload?.interviewAssessment].filter(Boolean);
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object" && (candidate.decision || candidate.jdMatch || Array.isArray(candidate.dimensions))) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
 const QUESTION_FEEDBACK_OPTIONS = [
   { id: "high_value", label: "高价值", color: "#059669", bg: "#ecfdf5" },
   { id: "normal", label: "一般", color: "#2563eb", bg: "#eff6ff" },
@@ -892,6 +902,7 @@ export default function App() {
   const [usageLogs,setUsageLogs]=useState(()=>load("hr_usage",[]));
   const [jobComposer,setJobComposer]=useState(EMPTY_JOB_COMPOSER);
   const [questionTasks,setQuestionTasks]=useState({});
+  const [interviewTasks,setInterviewTasks]=useState({});
   const [view,setView] =useState("dashboard");
   const [selJob,setSelJob]=useState(null);
   const [selCand,setSelCand]=useState(null);
@@ -989,6 +1000,12 @@ export default function App() {
       delete next[cid];
       return next;
     });
+    setInterviewTasks(prev=>{
+      if(!prev[cid]) return prev;
+      const next={...prev};
+      delete next[cid];
+      return next;
+    });
     if(selCand===cid) setSelCand(null);
   };
   const startQuestionGeneration=async(candidate,job,learning)=>{
@@ -1027,6 +1044,61 @@ export default function App() {
         [candidate.id]:{
           loading:false,
           error:error?.message||"面试题生成失败",
+          taskId,
+          startedAt:prev[candidate.id]?.startedAt||Date.now(),
+          finishedAt:Date.now(),
+        },
+      });
+    }
+  };
+  const startInterviewAssessment=async(candidate,job,round,notes)=>{
+    if(!candidate?.id) return;
+    const taskId=`interview-${candidate.id}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    setInterviewTasks(prev=>({
+      ...prev,
+      [candidate.id]:{
+        loading:true,
+        error:"",
+        taskId,
+        startedAt:Date.now(),
+      },
+    }));
+    try{
+      const res=await callAI(
+        cfg,
+        `你是资深HR，请严格按JSON格式输出，不含任何markdown标记。顶层只能返回一个对象，字符串尽量简洁。`,
+        `岗位：${job?.title} 要求：${job?.requirements}
+候选人：${candidate.name} 简历评分：${candidate.screening?.overallScore}/5.0 结论：${candidate.screening?.recommendation}
+T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i.dimension,s:i.score}))||[])}
+面试轮次：${round} 笔记：${notes}
+输出JSON：{"round":"${round}","jdMatch":"高度匹配|基本匹配|部分匹配|不匹配","score":4.5,"decision":"通过|待定|淘汰","suggestion":"建议后续行动",
+"dimensions":[{"name":"维度","note":"表现","score":4,"maxScore":5,"vsResume":"一致|存疑|不符","evidence":"依据"}],
+"emotions":{"trueMotivation":"真实动机","needsPriority":"成长>薪酬>稳定","stabilityRisk":"低|中|高","managementDifficulty":"低|中|高","stabilityNote":"说明","managementNote":"说明"},
+"highlights":["亮点"],"concerns":["顾虑"],"interviewerReview":"面试官复盘"}`,
+        recordTokens,dirCtx,
+        {maxTokens:2400}
+      );
+      if(res.error) throw new Error(res.raw||res.error);
+      const assessment=normalizeInterviewAssessmentPayload(res);
+      if(!assessment) throw new Error("模型已返回内容，但没有识别到有效的面试评估结果");
+      const ni={round,notes,date:new Date().toLocaleDateString("zh-CN"),assessment};
+      updCand(candidate.id,{
+        interviews:[...(candidate.interviews||[]),ni],
+        scheduledAt:null,
+        status:assessment.decision==="通过"?(round.includes("终")?"offer":"interview"):assessment.decision==="淘汰"?"rejected":"watching"
+      });
+      setInterviewTasks(prev=>{
+        if(prev[candidate.id]?.taskId!==taskId) return prev;
+        const next={...prev};
+        delete next[candidate.id];
+        return next;
+      });
+    }catch(error){
+      setInterviewTasks(prev=>prev[candidate.id]?.taskId!==taskId?prev:{
+        ...prev,
+        [candidate.id]:{
+          loading:false,
+          error:error?.message||"面试评估失败",
           taskId,
           startedAt:prev[candidate.id]?.startedAt||Date.now(),
           finishedAt:Date.now(),
@@ -1081,6 +1153,7 @@ export default function App() {
   const upcoming=cands.filter(c=>isSoon(c.scheduledAt)).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
   const dirDone=cands.filter(c=>c.directorVerdict?.verdict);
   const hasQuestionTaskRunning=Object.values(questionTasks).some(task=>task?.loading);
+  const hasInterviewTaskRunning=Object.values(interviewTasks).some(task=>task?.loading);
   const dirMatch=dirDone.filter(c=>{
     const aiRec=c.screening?.recommendation||"";
     const dir=c.directorVerdict.verdict;
@@ -1115,7 +1188,8 @@ export default function App() {
               {n.id==="settings"&&!Object.values(cfg.apiKeys||{}).some(Boolean)&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
               {n.id==="jobs"&&jobComposer.jdLoading&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>识别中</span>}
-              {n.id==="candidates"&&hasQuestionTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#7c3aed",color:"#fff",borderRadius:10}}>题目中</span>}
+              {n.id==="candidates"&&hasInterviewTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>评估中</span>}
+              {n.id==="candidates"&&!hasInterviewTaskRunning&&hasQuestionTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#7c3aed",color:"#fff",borderRadius:10}}>题目中</span>}
             </button>
           ))}
           {compared.length>=2&&(
@@ -1151,7 +1225,7 @@ export default function App() {
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} startQuestionGeneration={startQuestionGeneration} removeCandidate={removeCandidate}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
     </div>
@@ -1740,7 +1814,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,startQuestionGeneration,removeCandidate}) {
+function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate}) {
   const cand=cands.find(c=>c.id===selCand);
   const job=jobs.find(j=>j.id===cand?.jobId);
   const [showImport,setShowImport]=useState(false);
@@ -1784,6 +1858,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
                   <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
                   <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未绑定岗位"}</div>
                   {!j&&c.screening?.matchedJobTitle&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</div>}
+                  {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700}}>面试评估后台运行中</div>}
                   {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
                 </div>
                 <div style={{textAlign:"right",flexShrink:0}}>
@@ -1797,7 +1872,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} onDelete={()=>deleteCandidate(cand)}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
@@ -1903,7 +1978,7 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
-function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration,onDelete}) {
+function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening?.matchedJobTitle);
@@ -1977,7 +2052,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     </div>
     {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
     {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
-    {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx}/>}
+    {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
     {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
     {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
   </div>);
@@ -2246,7 +2321,7 @@ function QCard({T,q,onFeedbackChange}) {
 }
 
 // ─── INTERVIEW TAB ───────────────────────────────────────────
-function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
+function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,startInterviewAssessment}) {
   const [round,setRound]=useState("一面");
   const [notes,setNotes]=useState("");
   const [schedDate,setSchedDate]=useState("");
@@ -2256,10 +2331,25 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
   const [noteDrag,setNoteDrag]=useState(false);
   const [fileLoading,setFileLoading]=useState(false);
   const [fileInfo,setFileInfo]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [err,setErr]=useState("");
+  const [localErr,setLocalErr]=useState("");
+  const loading=!!interviewTask?.loading;
+  const err=interviewTask?.error||localErr||"";
   const dateInputRef=useRef(null);
   const timeInputRef=useRef(null);
+  const prevInterviewCountRef=useRef((cand.interviews||[]).length);
+
+  useEffect(()=>{
+    const currentCount=(cand.interviews||[]).length;
+    if(currentCount>prevInterviewCountRef.current){
+      setNotes("");
+      setRound("一面");
+      setNoteFile(null);
+      setNoteFileName("");
+      setFileInfo("");
+      setLocalErr("");
+    }
+    prevInterviewCountRef.current=currentCount;
+  },[cand.interviews]);
 
   const openPicker=ref=>{
     const input=ref?.current;
@@ -2273,16 +2363,16 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
 
   const queueNoteFile=file=>{
     if(!file) return;
-    if(getFileKind(file)==="unknown"){setErr("仅支持 PDF、图片、Word(.docx) 或纯文本面试记录文件");return;}
+    if(getFileKind(file)==="unknown"){setLocalErr("仅支持 PDF、图片、Word(.docx) 或纯文本面试记录文件");return;}
     setNoteFile(file);
     setNoteFileName(file.name);
-    setErr("");
+    setLocalErr("");
     setFileInfo("");
   };
 
   const appendInterviewFile=async()=>{
-    if(!noteFile){setErr("请先上传面试记录文件");return;}
-    setErr("");
+    if(!noteFile){setLocalErr("请先上传面试记录文件");return;}
+    setLocalErr("");
     setFileInfo("");
     setFileLoading(true);
     try{
@@ -2294,7 +2384,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
       setNotes(merged);
       setFileInfo(`已识别并追加：${noteFile.name}`);
     }catch(error){
-      setErr(error?.message||"面试记录文件识别失败");
+      setLocalErr(error?.message||"面试记录文件识别失败");
     }
     setFileLoading(false);
   };
@@ -2305,31 +2395,9 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx}) {
   };
 
   const assess=async()=>{
-    if(!notes.trim()){setErr("请填写面试笔记");return;}
-    setErr("");setLoading(true);
-    try{
-      const res=await callAI(cfg,
-        `你是资深HR，请严格按JSON格式输出，不含任何markdown标记。`,
-        `岗位：${job?.title} 要求：${job?.requirements}
-候选人：${cand.name} 简历评分：${cand.screening?.overallScore}/5.0 结论：${cand.screening?.recommendation}
-T1维度(简历)：${JSON.stringify(cand.screening?.t1?.items?.map(i=>({d:i.dimension,s:i.score}))||[])}
-面试轮次：${round} 笔记：${notes}
-输出JSON：{"round":"${round}","jdMatch":"高度匹配|基本匹配|部分匹配|不匹配","score":4.5,"decision":"通过|待定|淘汰","suggestion":"建议后续行动",
-"dimensions":[{"name":"维度","note":"表现","score":4,"maxScore":5,"vsResume":"一致|存疑|不符","evidence":"依据"}],
-"emotions":{"trueMotivation":"真实动机","needsPriority":"成长>薪酬>稳定","stabilityRisk":"低|中|高","managementDifficulty":"低|中|高","stabilityNote":"说明","managementNote":"说明"},
-"highlights":["亮点"],"concerns":["顾虑"],"interviewerReview":"面试官复盘"}`,
-        recordTokens,dirCtx
-      );
-      if(res.error) throw new Error(res.error);
-      const ni={round,notes,date:new Date().toLocaleDateString("zh-CN"),assessment:res};
-      updCand(cand.id,{
-        interviews:[...(cand.interviews||[]),ni],
-        scheduledAt:null,
-        status:res.decision==="通过"?(round.includes("终")?"offer":"interview"):res.decision==="淘汰"?"rejected":"watching"
-      });
-      setNotes("");setRound("一面");setNoteFile(null);setNoteFileName("");setFileInfo("");
-    }catch(e){setErr(e.message);}
-    setLoading(false);
+    if(!notes.trim()){setLocalErr("请填写面试笔记");return;}
+    setLocalErr("");
+    startInterviewAssessment?.(cand,job,round,notes);
   };
 
   return(<div>
@@ -2363,6 +2431,7 @@ T1维度(简历)：${JSON.stringify(cand.screening?.t1?.items?.map(i=>({d:i.dime
       {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
     </SCard>
     <SCard T={T} title="录入面试记录">
+      {loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 面试综合评估正在后台运行中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
       <div style={{marginBottom:12,padding:"14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
           <div>
