@@ -948,6 +948,17 @@ export default function App() {
     }));
   };
   const resetJobComposer=()=>setJobComposer(EMPTY_JOB_COMPOSER());
+  const removeCandidate=cid=>{
+    setCands(prev=>prev.filter(c=>c.id!==cid));
+    setCompared(prev=>prev.filter(id=>id!==cid));
+    setQuestionTasks(prev=>{
+      if(!prev[cid]) return prev;
+      const next={...prev};
+      delete next[cid];
+      return next;
+    });
+    if(selCand===cid) setSelCand(null);
+  };
   const startQuestionGeneration=async(candidate,job,learning)=>{
     if(!candidate?.id) return;
     const taskId=`question-${candidate.id}-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
@@ -1108,7 +1119,7 @@ export default function App() {
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} startQuestionGeneration={startQuestionGeneration}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} startQuestionGeneration={startQuestionGeneration} removeCandidate={removeCandidate}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
       </main>
     </div>
@@ -1365,19 +1376,11 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 }
 
 function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}) {
-  const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "__unassigned__");
   const [files,setFiles]=useState([]);
   const [drag,setDrag]=useState(false);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const [info,setInfo]=useState("");
-  const selectedJob=jobId==="__unassigned__"?null:jobs.find(j=>String(j.id)===String(jobId));
-
-  useEffect(()=>{
-    if(!jobs.length){setJobId("__unassigned__");return;}
-    if(jobId==="__unassigned__") return;
-    if(!jobs.some(job=>String(job.id)===String(jobId))) setJobId("__unassigned__");
-  },[jobs,jobId]);
 
   const fileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
   const queueFiles=inputFiles=>{
@@ -1412,7 +1415,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
     const failedKeys=new Set();
     for(const file of files){
       try{
-        const { candidate }=await createCandidateFromResumeFile({cfg,job:selectedJob,file,onTokens:recordTokens,dirCtx});
+        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx});
         created.push(candidate);
       }catch(error){
         failed.push(`${file.name}：${error?.message||"识别失败"}`);
@@ -1441,18 +1444,11 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
           <div>
             <div style={{fontSize:18,fontWeight:800,color:T.text}}>一键上传简历并完成 AI 首轮分析</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来。你可以指定岗位，也可以先不指定，系统会先完成通用规整和首轮评分。</div>
-          </div>
-          <div style={{minWidth:260,flex:"0 0 280px"}}>
-            <label style={lbSt(T)}>投递岗位（可选）</label>
-            <select value={jobId} onChange={e=>setJobId(e.target.value)} style={{...inSt(T),height:40}}>
-              <option value="__unassigned__">暂不指定岗位 · 先做通用初筛</option>
-              {jobs.map(job=><option key={job.id} value={job.id}>{job.title}{job.department?` · ${job.department}`:""}</option>)}
-            </select>
+            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来。系统会先智能识别并完成通用规整与首轮评分，岗位归属如果判断不准，后续再去岗位管理里修改。</div>
           </div>
         </div>
 
-        {!jobs.length&&<div style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:12,color:T.text3,lineHeight:1.8,marginBottom:14}}>当前还没有创建岗位，仍然可以直接上传简历。系统会先按通用标准完成规整和首轮评分，后续再补岗位即可。</div>}
+        <div style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:12,color:T.text3,lineHeight:1.8,marginBottom:14}}>上传时不需要先选岗位。系统会先按通用标准完成规整和首轮评分，后续如果岗位识别不准确，再去岗位管理里修正即可。</div>
 
         <div
           onDragOver={e=>{e.preventDefault();setDrag(true);}}
@@ -1464,12 +1460,12 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
           {loading
             ?<div>
               <Spin text="正在识别简历并生成首轮评分..." />
-              <div style={{fontSize:12,color:T.text4,marginTop:8}}>会先抽取文字，再结合岗位要求与学习规则完成自动初筛</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:8}}>会先抽取文字，再按通用标准完成自动规整与首轮初筛</div>
             </div>
             :<>
               <div style={{fontSize:36,lineHeight:1,marginBottom:12}}>⇪</div>
               <div style={{fontSize:19,fontWeight:800,color:T.text}}>把简历拖到这里，或点击选择文件</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前会按 <strong style={{color:T.text}}>{selectedJob?.title||"通用初筛模式"}</strong> 的标准做首轮分析。</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前会直接做通用初筛，后续可在岗位管理里再修正岗位归属。</div>
             </>}
         </div>
 
