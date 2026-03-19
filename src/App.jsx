@@ -339,6 +339,40 @@ const formatQuestionBankContext = knowledge => {
   return lines.join("\n");
 };
 
+const normalizeMatchText = text => cleanListLine(String(text || "").toLowerCase()).replace(/[，。！？、；：,.!?;:（）()\[\]\s]/g, "");
+const scoreQuestionBankSource = (questionText, sourceText) => {
+  const q = normalizeMatchText(questionText);
+  const s = normalizeMatchText(sourceText);
+  if (!q || !s) return 0;
+  if (q.includes(s) || s.includes(q)) return Math.min(q.length, s.length) + 10;
+  let score = 0;
+  const seen = new Set();
+  for (let i = 0; i < s.length - 1; i += 1) {
+    const gram = s.slice(i, i + 2);
+    if (seen.has(gram)) continue;
+    seen.add(gram);
+    if (q.includes(gram)) score += 2;
+  }
+  return score;
+};
+
+const getQuestionBankSourceMeta = (question, knowledge) => {
+  const bank = knowledge?.questionBank;
+  if (!bank) return null;
+  const candidates = [
+    ...(Array.isArray(bank.highSignalQuestions) ? bank.highSignalQuestions.map(item => ({ kind: "高价值题", text: item?.question, hint: item?.targetSignal || item?.purpose || "" })) : []),
+    ...(Array.isArray(bank.questionPatterns) ? bank.questionPatterns.map(item => ({ kind: "优先提问模式", text: item?.pattern, hint: item?.useWhen || item?.why || "" })) : []),
+    ...(Array.isArray(bank.followUpPatterns) ? bank.followUpPatterns.map(item => ({ kind: "高价值追问模式", text: item?.pattern, hint: item?.why || item?.useWhen || "" })) : []),
+    ...(Array.isArray(bank.avoidQuestions) ? bank.avoidQuestions.map(item => ({ kind: "应少问/淘汰题", text: item?.question, hint: item?.reason || "" })) : []),
+  ].filter(item => item.text);
+  let best = null;
+  candidates.forEach(item => {
+    const score = scoreQuestionBankSource(question?.question || "", item.text);
+    if (!best || score > best.score) best = { ...item, score };
+  });
+  return best && best.score >= 4 ? best : null;
+};
+
 const buildJobOptionsContext = jobs => {
   const items = (jobs || []).map(job => {
     const lines = [
@@ -2273,14 +2307,14 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
         const sq=qs.map((q,index)=>({q,index})).filter(item=>item.q.step===step);
         return(<div key={step} style={{marginBottom:18}}>
           <div style={{fontSize:12,fontWeight:700,color:T.text2,padding:"6px 12px",background:T.navActive,borderRadius:6,marginBottom:9,borderLeft:`3px solid ${T.accent}`}}>第{step}步 · {sq[0]?.q?.stepName}</div>
-          {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
+          {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} sourceMeta={getQuestionBankSourceMeta(q, learning)} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
         </div>);
       })}
       <button onClick={()=>updCand(cand.id,{questions:null})} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
     </div>)}
   </div>);
 }
-function QCard({T,q,onFeedbackChange}) {
+function QCard({T,q,sourceMeta,onFeedbackChange}) {
   const [open,setOpen]=useState(false);
   const feedbackOption = getQuestionFeedbackOption(q.feedbackTag);
   return(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:14,marginBottom:9}}>
@@ -2290,6 +2324,7 @@ function QCard({T,q,onFeedbackChange}) {
           <Chip c={T.text2} bg={T.navActive}>{q.tag}</Chip>
           {q.subTag&&<Chip c={T.text3} bg={T.card2}>{q.subTag}</Chip>}
           {q.principle&&<Chip c="#7c3aed" bg="#f3e8ff">{q.principle}</Chip>}
+          {sourceMeta&&<Chip c={sourceMeta.kind==="应少问/淘汰题"?"#b91c1c":"#1d4ed8"} bg={sourceMeta.kind==="应少问/淘汰题"?"#fee2e2":"#dbeafe"}>{`来源：${sourceMeta.kind}`}</Chip>}
           {feedbackOption&&<Chip c={feedbackOption.color} bg={feedbackOption.bg}>{feedbackOption.label}</Chip>}
         </div>
         <div style={{fontSize:14,color:T.text,fontWeight:500,lineHeight:1.5}}>{q.question}</div>
@@ -2298,6 +2333,10 @@ function QCard({T,q,onFeedbackChange}) {
       <span style={{fontSize:11,color:T.text4,flexShrink:0}}>{open?"▲":"▼"}</span>
     </div>
     {open&&<div style={{marginTop:13,paddingTop:13,borderTop:`1px solid ${T.border}`}}>
+      {sourceMeta&&<div style={{padding:"7px 9px",borderRadius:6,background:sourceMeta.kind==="应少问/淘汰题"?"#fff5f5":"#eff6ff",marginBottom:8}}>
+        <span style={{fontSize:10,fontWeight:700,color:sourceMeta.kind==="应少问/淘汰题"?"#b91c1c":"#1d4ed8",marginRight:6}}>题库来源</span>
+        <span style={{fontSize:12,color:"#374151"}}>{sourceMeta.text}{sourceMeta.hint?` · ${sourceMeta.hint}`:""}</span>
+      </div>}
       {[["考察目标","#374151","#f9fafb",q.purpose],["好的回答","#16a34a","#f0fdf4",q.goodAnswer],["一般回答","#ca8a04","#fefce8",q.okAnswer],["差的回答","#dc2626","#fff5f5",q.badAnswer],q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],["追问方向","#4f46e5","#eef2ff",q.followUp]].filter(Boolean).map(([l,c,bg,t])=>(
         <div key={l} style={{padding:"7px 9px",borderRadius:6,background:bg,marginBottom:7}}><span style={{fontSize:10,fontWeight:700,color:c,marginRight:5}}>{l}</span><span style={{fontSize:13,color:"#374151",lineHeight:1.6}}>{t}</span></div>
       ))}
