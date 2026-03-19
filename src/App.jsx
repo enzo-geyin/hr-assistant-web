@@ -1708,10 +1708,16 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,startQuestionGeneration}) {
+function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,startQuestionGeneration,removeCandidate}) {
   const cand=cands.find(c=>c.id===selCand);
   const job=jobs.find(j=>j.id===cand?.jobId);
   const [showImport,setShowImport]=useState(false);
+  const deleteCandidate=candidate=>{
+    if(!candidate) return;
+    const ok=window.confirm(`确认删除候选人「${candidate.name||"未命名候选人"}」吗？\n\n这会同时删除该简历的筛选结果、面试记录、总监判断和相关反馈，并同步到云端。`);
+    if(!ok) return;
+    removeCandidate?.(candidate.id);
+  };
   const onCreated=candidate=>{
     setCands(prev=>[candidate,...prev]);
     setSelCand(candidate.id);
@@ -1722,7 +1728,10 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     {showImport&&<ResumeImportModal T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated}/>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>在候选人库里直接上传简历，系统会自动识别文字、规整简历，并按所选岗位完成初筛。</div>
-      <button onClick={()=>setShowImport(true)} style={{padding:"9px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>+ 上传简历</button>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+        {cand&&<button onClick={()=>deleteCandidate(cand)} style={{padding:"9px 16px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>删除当前候选人</button>}
+        <button onClick={()=>setShowImport(true)} style={{padding:"9px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>+ 上传简历</button>
+      </div>
     </div>
     <div style={{display:"grid",gridTemplateColumns:"256px 1fr",gap:20}}>
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
@@ -1755,7 +1764,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} onDelete={()=>deleteCandidate(cand)}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
@@ -1861,7 +1870,7 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
-function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration}) {
+function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration,onDelete}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const refreshLearning=async()=>{
@@ -1902,6 +1911,7 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,quest
         <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||""}</div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <button onClick={onDelete} style={{padding:"6px 10px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>删除简历</button>
         {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"4px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
         {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>📅 {fmtDate(cand.scheduledAt)}</span>}
         <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value})} style={{...inSt(T),width:"auto",fontSize:12,padding:"6px 8px"}}>
