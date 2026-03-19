@@ -302,6 +302,24 @@ const formatQuestionBankContext = knowledge => {
   if (!bank && !summary) return "";
   const lines = ["【学习后的面试题库偏好】"];
   if (summary) lines.push(`题库摘要：${summary}`);
+  const dynamicSections = [
+    ["highSignalQuestions", "高价值题"],
+    ["questionPatterns", "优先提问模式"],
+    ["followUpPatterns", "高价值追问模式"],
+    ["avoidQuestions", "应少问/淘汰题"],
+  ];
+  let hasDynamicSections = false;
+  dynamicSections.forEach(([key, label]) => {
+    const items = Array.isArray(bank?.[key]) ? bank[key].slice(0, 3) : [];
+    if (!items.length) return;
+    hasDynamicSections = true;
+    lines.push(`${label}：${items.map(item => {
+      const question = cleanListLine(item?.question || item?.pattern || "");
+      const targetSignal = cleanListLine(item?.targetSignal || item?.useWhen || item?.reason || "");
+      return targetSignal ? `${question}（${targetSignal}）` : question;
+    }).filter(Boolean).join("；")}`);
+  });
+  if (hasDynamicSections) return lines.join("\n");
   const sections = [
     ["mustAsk", "必问题"],
     ["behavioral", "行为题"],
@@ -473,14 +491,15 @@ ${roleBaselineCtx}
 ${candidateBiasCtx}
 生成10道结构化面试题，返回JSON：
 {"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","principle":"命中的准则名称","resumeEvidence":"对应简历锚点","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
-步骤：1.开场破冰 2.自我介绍 3.离职动机 4.行为面试STAR(4-5题) 5.专业题(2题) 6.反问
+步骤建议：1.开场破冰 2.自我介绍 3.离职动机 4.经历深挖(4-5题) 5.关键鉴别题(2-3题) 6.反问
 要求：
 1. 优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。
 2. 必须返回合法 JSON，只能有一个顶层对象，顶层键名固定为 questions。
 3. 每道题都要明确写出它命中的准则（principle）和对应的简历锚点（resumeEvidence）。
 4. 所有问题必须指向候选人的真实过往案例，默认使用“请回忆一次你过去...” “你当时具体怎么做的...” 这样的问法。
 5. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
-6. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
+6. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
+7. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
 };
 
 const normalizeQuestionsPayload = payload => {
@@ -532,7 +551,8 @@ const summarizeInterviews = cand => (cand.interviews||[])
     const ast = ir.assessment || {};
     const highlights = Array.isArray(ast.highlights) ? ast.highlights.join("、") : "";
     const concerns = Array.isArray(ast.concerns) ? ast.concerns.join("、") : "";
-    return `${ir.round || "面试"}：结论${ast.decision || "未定"}；建议${ast.suggestion || "无"}；亮点${highlights || "无"}；顾虑${concerns || "无"}`;
+    const noteSnippet = normalizeExtractedText(ir.notes || "").slice(0, 140);
+    return `${ir.round || "面试"}：结论${ast.decision || "未定"}；建议${ast.suggestion || "无"}；亮点${highlights || "无"}；顾虑${concerns || "无"}；原始笔记${noteSnippet || "无"}`;
   })
   .join("\n");
 
@@ -590,11 +610,12 @@ ${samples.map((sample, index) => `样本${index+1}：
 - 偏差类型：${sample.mismatchType||"无"}
 - 备注：${sample.deltaNotes||"无"}`).join("\n\n")}
 输出JSON：
-{"rubricSummary":"一句话总结这一岗位最新判断基准","rubric":{"hardRequirements":["硬门槛"],"coreDimensions":[{"dimension":"维度","weight":"高|中|低","note":"评分说明"}],"passSignals":["优先录用信号"],"redFlags":["高风险信号"],"calibrationTips":["避免误判的评分提醒"]},"questionBankSummary":"一句话总结最新题库策略","questionBank":{"mustAsk":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"behavioral":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"technical":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"redFlagChecks":[{"question":"问题","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}],"followUps":[{"question":"追问","purpose":"目的","targetDimension":"对应维度","step":"建议面试阶段"}]}}
+{"rubricSummary":"一句话总结这一岗位最新判断基准","rubric":{"hardRequirements":["硬门槛"],"coreDimensions":[{"dimension":"维度","weight":"高|中|低","note":"评分说明"}],"passSignals":["优先录用信号"],"redFlags":["高风险信号"],"calibrationTips":["避免误判的评分提醒"]},"questionBankSummary":"一句话总结最新题库策略","questionBank":{"highSignalQuestions":[{"question":"高价值问题","purpose":"为什么有效","targetSignal":"主要识别什么","step":"建议放在第几步"}],"questionPatterns":[{"pattern":"问题模板/提问方向","useWhen":"适用场景","why":"为什么有效"}],"followUpPatterns":[{"pattern":"追问方式","useWhen":"何时继续追问","why":"能挖出什么"}],"avoidQuestions":[{"question":"应该少问或淘汰的问题","reason":"为什么低效/重复/容易被套话"}]}}
 要求：
 1. 规则一定要能指导后续筛选和面试，不要空泛。
-2. 题库必须围绕高区分度问题，不要重复。
-3. 如果历史样本不足，仍需输出一个保守版本。`;
+2. 题库必须优先根据面试笔记和题目反馈，区分哪些题真正问出了信息、哪些题只是套话或重复。
+3. 不要强行按行为题/技术题分类，更重要的是高区分度、可追问、能和简历经历对上。
+4. 如果历史样本不足，仍需输出一个保守版本。`;
 
 async function learnFromDirectorFeedback(cfg, cand, job, verdict, reason, recordTokens) {
   if (!job?.id) return { sampleCount: 0, updatedKnowledge: false };
@@ -2531,6 +2552,47 @@ function IRecord({T,record}) {
   </div>);
 }
 
+function QuestionBankPanel({T,learning}) {
+  const bank = learning?.questionBank;
+  const sections = [
+    ["highSignalQuestions","高价值题",(item)=>`${cleanListLine(item?.question||"")}${cleanListLine(item?.targetSignal||"")?` · ${cleanListLine(item.targetSignal)}`:""}`],
+    ["questionPatterns","优先提问模式",(item)=>`${cleanListLine(item?.pattern||"")}${cleanListLine(item?.useWhen||"")?` · 适用：${cleanListLine(item.useWhen)}`:""}`],
+    ["followUpPatterns","高价值追问模式",(item)=>`${cleanListLine(item?.pattern||"")}${cleanListLine(item?.why||"")?` · 价值：${cleanListLine(item.why)}`:""}`],
+    ["avoidQuestions","应少问/淘汰题",(item)=>`${cleanListLine(item?.question||"")}${cleanListLine(item?.reason||"")?` · 原因：${cleanListLine(item.reason)}`:""}`],
+  ];
+  const hasDynamic = sections.some(([key])=>Array.isArray(bank?.[key])&&bank[key].length);
+  if (!hasDynamic && !learning?.questionBankSummary) return null;
+  return (
+    <div style={{...cardSt(T),marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:T.text}}>题库优化面板</div>
+          {learning?.questionBankSummary&&<div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>{learning.questionBankSummary}</div>}
+        </div>
+        {learning?.questionBankVersion&&<Chip c="#7c3aed" bg="#f5f3ff">题库 v{learning.questionBankVersion}</Chip>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        {sections.map(([key,label,fmtItem])=>{
+          const items = Array.isArray(bank?.[key]) ? bank[key].slice(0,4) : [];
+          if (!items.length) return null;
+          return (
+            <div key={key} style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:8}}>{label}</div>
+              <div style={{display:"grid",gap:8}}>
+                {items.map((item,index)=>(
+                  <div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.7,paddingBottom:8,borderBottom:index===items.length-1?"none":`1px solid ${T.border}`}}>
+                    {fmtItem(item)}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── DIRECTOR TAB ────────────────────────────────────────────
 function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState,refreshLearning}) {
   const dir=cand.directorVerdict||{};
@@ -2588,6 +2650,7 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
       </div>
       {learningMsg&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7}}>{learningMsg}</div>}
     </div>
+    <QuestionBankPanel T={T} learning={learning}/>
 
     {cand.screening&&(
       <div style={{...cardSt(T),marginBottom:14}}>
