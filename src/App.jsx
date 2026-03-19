@@ -1782,13 +1782,14 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
                 <Av name={c.name} T={T} size={30}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
-                <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未知岗位"}</div>
-                {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
-              </div>
-              <div style={{textAlign:"right",flexShrink:0}}>
-                <SBadge status={c.status}/>
-                {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
-              </div>
+                  <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未绑定岗位"}</div>
+                  {!j&&c.screening?.matchedJobTitle&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</div>}
+                  {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <SBadge status={c.status}/>
+                  {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
+                </div>
               </div>
               {c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26}}>📅 {fmtDate(c.scheduledAt)}</div>}
               {c.directorVerdict?.verdict&&<div style={{fontSize:10,marginTop:3,marginLeft:26,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
@@ -1796,7 +1797,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} onDelete={()=>deleteCandidate(cand)}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} onDelete={()=>deleteCandidate(cand)}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
@@ -1902,9 +1903,14 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
-function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration,onDelete}) {
+function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,startQuestionGeneration,onDelete}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
+  const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening?.matchedJobTitle);
+  const assignJob=jobIdValue=>{
+    const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
+    updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
+  };
   const refreshLearning=async()=>{
     if(!job?.id){setLearning({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});setLearningState({loading:false,error:""});return;}
     setLearningState({loading:true,error:""});
@@ -1940,12 +1946,20 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,quest
       <Av name={cand.name} T={T} size={42}/>
       <div style={{flex:1}}>
         <div style={{fontSize:17,fontWeight:800,color:T.text}}>{cand.name||"未命名候选人"}</div>
-        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||""}</div>
+        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||"未绑定岗位"}</div>
+        {!job&&cand.screening?.matchedJobTitle&&<div style={{fontSize:11,color:"#2563eb",marginTop:4,lineHeight:1.6}}>AI建议岗位：<strong>{cand.screening.matchedJobTitle}</strong>{cand.screening?.matchedJobReason?` · ${cand.screening.matchedJobReason}`:""}</div>}
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
         <button onClick={onDelete} style={{padding:"6px 10px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>删除简历</button>
         {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"4px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
         {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>📅 {fmtDate(cand.scheduledAt)}</span>}
+        <div style={{display:"flex",gap:8,alignItems:"center",minWidth:240}}>
+          <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"auto",minWidth:180,fontSize:12,padding:"6px 8px"}}>
+            <option value="">未绑定岗位</option>
+            {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
+          </select>
+          {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{padding:"6px 10px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>套用AI匹配</button>}
+        </div>
         <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value})} style={{...inSt(T),width:"auto",fontSize:12,padding:"6px 8px"}}>
           {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
         </select>
@@ -1955,6 +1969,7 @@ function CandDetail({T,cand,job,tab,setTab,cfg,updCand,recordTokens,dirCtx,quest
         </div>}
       </div>
     </div>
+    <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
     <div style={{display:"flex",gap:0,marginBottom:14,background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:4}}>
       {tabs.map(t=><button key={t.id}
         style={{flex:1,padding:"7px 4px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:7,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?700:400,opacity:t.disabled?0.4:1,transition:"all 0.1s"}}
