@@ -1059,6 +1059,7 @@ export default function App() {
       [candidate.id]:{
         loading:true,
         error:"",
+        raw:"",
         taskId,
         startedAt:Date.now(),
       },
@@ -1078,9 +1079,9 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
         recordTokens,dirCtx,
         {maxTokens:2400}
       );
-      if(res.error) throw new Error(res.raw||res.error);
+      if(res.error) throw { message: res.error, raw: res.raw || "" };
       const assessment=normalizeInterviewAssessmentPayload(res);
-      if(!assessment) throw new Error("模型已返回内容，但没有识别到有效的面试评估结果");
+      if(!assessment) throw { message: "模型已返回内容，但没有识别到有效的面试评估结果", raw: JSON.stringify(res, null, 2) };
       const ni={round,notes,date:new Date().toLocaleDateString("zh-CN"),assessment};
       updCand(candidate.id,{
         interviews:[...(candidate.interviews||[]),ni],
@@ -1099,6 +1100,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
         [candidate.id]:{
           loading:false,
           error:error?.message||"面试评估失败",
+          raw:error?.raw||"",
           taskId,
           startedAt:prev[candidate.id]?.startedAt||Date.now(),
           finishedAt:Date.now(),
@@ -2334,6 +2336,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const [localErr,setLocalErr]=useState("");
   const loading=!!interviewTask?.loading;
   const err=interviewTask?.error||localErr||"";
+  const rawErr=interviewTask?.raw||"";
   const dateInputRef=useRef(null);
   const timeInputRef=useRef(null);
   const prevInterviewCountRef=useRef((cand.interviews||[]).length);
@@ -2467,6 +2470,10 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
       </div>
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ AI将参考你的历史判断标准进行评估</div>}
       {err&&<ErrBox>{err}</ErrBox>}
+      {!!rawErr&&<details style={{marginBottom:10}}>
+        <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
+        <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
+      </details>}
       <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
     </SCard>
   </div>);
