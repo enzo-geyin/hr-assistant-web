@@ -202,6 +202,19 @@ const normalizeExtractedText = text => String(text || "")
   .replace(/\n{3,}/g, "\n\n")
   .trim();
 
+const buildReadableResumePreview = text => normalizeExtractedText(String(text || "")
+  .replace(/\[\s*第\s*\d+\s*页\s*\]/gi, "\n")
+  .replace(/([。！？；])/g, "$1\n")
+  .replace(/(\d{4}[./-]\d{1,2}\s*[-~至到]+\s*(?:\d{4}[./-]\d{1,2}|至今))/g, "\n$1")
+  .replace(/((?:19|20)\d{2}[./-]\d{1,2}(?:[./-]\d{1,2})?)/g, "\n$1")
+  .replace(/(工作内容[：:])/g, "\n$1")
+  .replace(/(项目内容[：:])/g, "\n$1")
+  .replace(/(教育背景[：:])/g, "\n$1")
+  .replace(/(自我评价[：:])/g, "\n$1")
+  .replace(/(技能特长[：:])/g, "\n$1")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim());
+
 const normalizeLooseListText = text => normalizeExtractedText(String(text || "")
   .replace(/([0-9]{1,2}\s*[\.、\)])\s*/g, "\n$1 ")
   .replace(/[•·●▪◦▸►]/g, "\n")
@@ -387,20 +400,47 @@ const buildJobOptionsContext = jobs => {
   return items.length ? `候选岗位列表：\n${items.join("\n")}` : "";
 };
 
+const ROLE_KEYWORD_GROUPS = [
+  ["店铺运营", /(店铺运营|店务运营|店铺管理|店铺后台|电商运营|淘系运营|快手店铺|抖音店铺|商品运营|店铺店务|商城运营)/gi],
+  ["短视频编导", /(编导|短视频|脚本|选题|内容策划|导演|内容组)/gi],
+  ["剪辑后期", /(剪辑|后期|pr|ae|剪映|达芬奇|包装|调色)/gi],
+  ["拍摄执行", /(拍摄|摄影|机位|打光|收音|器材)/gi],
+  ["信息流投放", /(信息流|投流|投放|优化师|买量|roi|cpm|ctr|cvr|账户|出价|人群包|计划)/gi],
+  ["直播运营", /(直播运营|中控|场控|直播间|主播|排品|千川|直播投流)/gi],
+  ["内容运营", /(内容运营|内容增长|新媒体|种草|小红书|公众号|社媒运营)/gi],
+];
+const escapeRegExp = text => String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const extractRoleKeywords = text => {
   const src = String(text || "").toLowerCase();
-  const groups = [
-    ["店铺运营", /(店铺运营|店务运营|店铺管理|店铺后台|电商运营|淘系运营|快手店铺|抖音店铺|商品运营|店铺店务|商城运营)/g],
-    ["短视频编导", /(编导|短视频|脚本|选题|内容策划|导演|内容组)/g],
-    ["剪辑后期", /(剪辑|后期|pr|ae|剪映|达芬奇|包装|调色)/g],
-    ["拍摄执行", /(拍摄|摄影|机位|打光|收音|器材)/g],
-    ["信息流投放", /(信息流|投流|投放|优化师|买量|roi|cpm|ctr|cvr|账户|出价|人群包|计划)/g],
-    ["直播运营", /(直播运营|中控|场控|直播间|主播|排品|千川|直播投流)/g],
-    ["内容运营", /(内容运营|内容增长|新媒体|种草|小红书|公众号|社媒运营)/g],
-  ];
-  return groups
+  return ROLE_KEYWORD_GROUPS
     .filter(([, re]) => re.test(src))
     .map(([label]) => label);
+};
+const extractRoleKeywordHits = (text, limit = 18) => {
+  const src = String(text || "");
+  const hits = [];
+  ROLE_KEYWORD_GROUPS.forEach(([, re]) => {
+    re.lastIndex = 0;
+    const matches = src.match(re) || [];
+    matches.forEach(hit => {
+      const normalized = String(hit || "").trim();
+      if (!normalized) return;
+      if (!hits.some(item => item.toLowerCase() === normalized.toLowerCase())) hits.push(normalized);
+    });
+  });
+  return hits.slice(0, limit);
+};
+const highlightTextByKeywords = (text, keywords = []) => {
+  const src = String(text || "");
+  const list = Array.from(new Set((keywords || []).filter(Boolean))).sort((a, b) => b.length - a.length);
+  if (!src || !list.length) return src;
+  const regex = new RegExp(`(${list.map(escapeRegExp).join("|")})`, "gi");
+  return src.split(regex).map((part, index) => {
+    const matched = list.some(keyword => keyword.toLowerCase() === String(part).toLowerCase());
+    return matched
+      ? <mark key={`hit-${index}`} style={{background:"#fef3c7",color:"#92400e",padding:"0 2px",borderRadius:4}}>{part}</mark>
+      : <span key={`txt-${index}`}>{part}</span>;
+  });
 };
 
 const scoreJobMatch = (job, screening = {}, resumeText = "") => {
@@ -2227,6 +2267,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const [showResumePreview,setShowResumePreview]=useState(true);
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
+  const readablePreview=buildReadableResumePreview(previewResume);
+  const resumeKeywordHits=extractRoleKeywordHits(previewResume);
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
@@ -2324,11 +2366,14 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
         {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
       </div>
+      {resumeKeywordHits.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        {resumeKeywordHits.map(hit=><Chip key={hit} c="#92400e" bg="#fef3c7">{hit}</Chip>)}
+      </div>}
       {cand.screening?.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:10,marginBottom:10}}>
         <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
       </div>}
-      {showResumePreview&&<div style={{fontSize:12,color:T.text2,lineHeight:1.8,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:240,overflow:"auto"}}>
-        {previewResume}
+      {showResumePreview&&<div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
+        {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
       </div>}
     </div>}
     <div style={{display:"flex",gap:6,marginBottom:16,background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:6,boxShadow:SOFT_SHADOW}}>
