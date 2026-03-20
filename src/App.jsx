@@ -1109,6 +1109,16 @@ const isSoon=s=>{if(!s)return false;const d=(new Date(s)-new Date())/86400000;re
 const fmtDate=s=>{if(!s)return "";const d=new Date(s);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
 const EMPTY_JOB_FORM=()=>({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
 const EMPTY_JOB_COMPOSER=()=>({open:false,form:EMPTY_JOB_FORM(),jdFileName:"",jdLoading:false,jdErr:"",parsedJobs:[],activeParsedJob:0,taskId:null});
+const normalizeJobLevel = level => cleanListLine(level || "").toLowerCase();
+const isSingleRoundLevel = level => /(专员|组长|主管)/.test(normalizeJobLevel(level)) && !/(经理|总监)/.test(normalizeJobLevel(level));
+const getInterviewRoundsForJob = job => isSingleRoundLevel(job?.level) ? ["一面"] : ["一面","二面","三面","终面","HR面"];
+const getPostInterviewStatus = (job, round, decision) => {
+  if (decision === "淘汰") return "rejected";
+  if (decision !== "通过") return "watching";
+  if (round.includes("终")) return "offer";
+  if (isSingleRoundLevel(job?.level)) return "watching";
+  return "interview";
+};
 
 // ─── APP ROOT ────────────────────────────────────────────────
 export default function App() {
@@ -1302,7 +1312,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       updCand(candidate.id,{
         interviews:[...(candidate.interviews||[]),ni],
         scheduledAt:null,
-        status:assessment.decision==="通过"?(round.includes("终")?"offer":"interview"):assessment.decision==="淘汰"?"rejected":"watching"
+        status:getPostInterviewStatus(job, round, assessment.decision)
       });
       setInterviewTasks(prev=>{
         if(prev[candidate.id]?.taskId!==taskId) return prev;
@@ -2559,7 +2569,8 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
 
 // ─── INTERVIEW TAB ───────────────────────────────────────────
 function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,startInterviewAssessment}) {
-  const [round,setRound]=useState("一面");
+  const roundOptions = getInterviewRoundsForJob(job);
+  const [round,setRound]=useState(roundOptions[0] || "一面");
   const [notes,setNotes]=useState("");
   const [schedDate,setSchedDate]=useState("");
   const [schedTime,setSchedTime]=useState("10:00");
@@ -2580,14 +2591,18 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     const currentCount=(cand.interviews||[]).length;
     if(currentCount>prevInterviewCountRef.current){
       setNotes("");
-      setRound("一面");
+      setRound(roundOptions[0] || "一面");
       setNoteFile(null);
       setNoteFileName("");
       setFileInfo("");
       setLocalErr("");
     }
     prevInterviewCountRef.current=currentCount;
-  },[cand.interviews]);
+  },[cand.interviews,roundOptions]);
+
+  useEffect(()=>{
+    if(!roundOptions.includes(round)) setRound(roundOptions[0] || "一面");
+  },[round,roundOptions]);
 
   const openPicker=ref=>{
     const input=ref?.current;
@@ -2644,7 +2659,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr auto",gap:10,alignItems:"flex-end"}}>
         <div><label style={lbSt(T)}>面试轮次</label>
           <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T)}}>
-            {["一面","二面","三面","终面","HR面"].map(r=><option key={r}>{r}</option>)}
+            {roundOptions.map(r=><option key={r}>{r}</option>)}
           </select>
         </div>
         <div>
@@ -2666,6 +2681,9 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
           确认预约
         </button>
       </div>
+      {isSingleRoundLevel(job?.level)&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7,padding:"8px 10px",background:T.card2,borderRadius:8}}>
+        当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
+      </div>}
       {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
     </SCard>
     <SCard T={T} title="录入面试记录">
