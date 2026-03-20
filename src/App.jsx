@@ -2104,7 +2104,12 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
                   {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
                 </div>
               </div>
-              {c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26}}>📅 {fmtDate(c.scheduledAt)}</div>}
+              {c.status==="interview"&&(
+                <div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26,fontWeight:700}}>
+                  📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}`:"已进入面试 · 待安排时间"}
+                </div>
+              )}
+              {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26}}>📅 {fmtDate(c.scheduledAt)}</div>}
               {c.directorVerdict?.verdict&&<div style={{fontSize:10,marginTop:3,marginLeft:26,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
             </div>);
           })}
