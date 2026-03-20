@@ -1107,6 +1107,8 @@ const fmt=n=>n?.toLocaleString()||"0";
 const todayStr=()=>new Date().toISOString().slice(0,10);
 const isSoon=s=>{if(!s)return false;const d=(new Date(s)-new Date())/86400000;return d>=-0.1&&d<=7;};
 const fmtDate=s=>{if(!s)return "";const d=new Date(s);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;};
+const SOFT_SHADOW="0 10px 30px rgba(15,23,42,0.06)";
+const CARD_RADIUS=16;
 const EMPTY_JOB_FORM=()=>({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
 const EMPTY_JOB_COMPOSER=()=>({open:false,form:EMPTY_JOB_FORM(),jdFileName:"",jdLoading:false,jdErr:"",parsedJobs:[],activeParsedJob:0,taskId:null});
 const normalizeJobLevel = level => cleanListLine(level || "").toLowerCase();
@@ -1556,15 +1558,15 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
     {/* 板块1：数据看板 */}
     <SecLabel T={T}>数据看板</SecLabel>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:12,marginBottom:12}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginBottom:14}}>
       {stats.map(s=>(
-        <div key={s.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px",borderTop:`3px solid ${s.color}`}}>
+        <div key={s.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",borderTop:`3px solid ${s.color}`,boxShadow:SOFT_SHADOW}}>
           <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1}}>{s.val}</div>
           <div style={{fontSize:12,color:T.text3,marginTop:5}}>{s.label}</div>
         </div>
       ))}
     </div>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:"11px 16px",marginBottom:22}}>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"14px 18px",marginBottom:24,boxShadow:SOFT_SHADOW}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
         <span style={{fontSize:12,color:T.text3}}>总候选人 {total} 人</span>
         <div style={{display:"flex",gap:16}}>
@@ -1582,14 +1584,14 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 
     {/* 板块2：在招岗位 */}
     <SecLabel T={T}>在招岗位 ({jobs.length})</SecLabel>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12,marginBottom:22}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:24}}>
       {jobs.length===0?<div style={{gridColumn:"1 / -1"}}><Empty T={T} icon="◈" title="暂无在招岗位" sub="先去岗位管理新建岗位，再开始批量上传简历。"/></div>
       :jobs.map(job=>{
         const jobCands=cands.filter(c=>c.jobId===job.id);
         const qualified=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="合格").length;
         const pending=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="待定").length;
         const rejected=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="淘汰").length;
-        return(<div key={job.id} onClick={()=>onJobClick(job.id)} className="hr" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 16px 14px",cursor:"pointer"}}>
+        return(<div key={job.id} onClick={()=>onJobClick(job.id)} className="hr" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",cursor:"pointer",boxShadow:SOFT_SHADOW,transition:"transform 0.16s ease, box-shadow 0.16s ease"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}>
             <div>
               <div style={{fontSize:15,fontWeight:800,color:T.text}}>{job.title}</div>
@@ -1611,16 +1613,16 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 
     {/* 板块3：评分标准 */}
     <SecLabel T={T}>评分标准</SecLabel>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 18px 16px",marginBottom:14}}>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"22px 22px 18px",marginBottom:16,boxShadow:SOFT_SHADOW}}>
       <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>评分拆解（通用版）</div>
       <div style={{fontSize:12,color:T.text4,lineHeight:1.8,marginBottom:16}}>先看 T0 / T1 / T2 具体考察什么。T0 现在代表“是否具备进入评估池的最低岗位匹配”，再用下面的总分档位判断候选人是合格、待定还是淘汰。</div>
 
       <div style={{marginBottom:16}}>
         <div style={{fontSize:11,fontWeight:800,color:T.text4,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>T0 硬性条件</div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
           {DASHBOARD_SCORE_GUIDE.t0.map(item=>{
             const tone=item.level==="高"?{c:"#b91c1c",bg:"#fee2e2"}:item.level==="中"?{c:"#92400e",bg:"#fef3c7"}:{c:"#374151",bg:"#f3f4f6"};
-            return(<div key={item.label} style={{padding:"8px 10px",background:tone.bg,borderRadius:10,border:`1px solid ${T.border}`}}>
+            return(<div key={item.label} style={{padding:"12px 12px 11px",background:tone.bg,borderRadius:12,border:`1px solid ${T.border}`}}>
               <div style={{fontSize:12,fontWeight:700,color:T.text,lineHeight:1.5}}>{item.label}</div>
               <div style={{fontSize:10,fontWeight:700,color:tone.c,marginTop:4}}>重要度：{item.level}</div>
             </div>);
@@ -1650,13 +1652,13 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
         </div>
       </div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:12,marginBottom:22}}>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:12,marginBottom:24}}>
       {[
         {label:"合格",range:"4.5 - 5.0",desc:"建议直接进入下一轮，优先安排面试。",color:"#059669",bg:"#ecfdf5"},
         {label:"待定",range:"3.0 - 4.4",desc:"保留在观察池，建议补充验证或二次筛选。",color:"#d97706",bg:"#fffbeb"},
         {label:"淘汰",range:"0 - 2.9",desc:"与岗位要求偏差较大，建议结束当前流程。",color:"#dc2626",bg:"#fef2f2"},
       ].map(item=>(
-        <div key={item.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 16px 14px"}}>
+        <div key={item.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",boxShadow:SOFT_SHADOW}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <Chip c={item.color} bg={item.bg} lg>{item.label}</Chip>
             <div style={{fontSize:20,fontWeight:900,color:item.color}}>{item.range}</div>
@@ -1672,7 +1674,7 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 
     {/* 板块5：候选人列表 */}
     <SecLabel T={T}>候选人列表 ({cands.length})</SecLabel>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,overflow:"hidden",boxShadow:SOFT_SHADOW}}>
       {rankedCands.length===0?<div style={{padding:"44px 20px",textAlign:"center",color:T.text4,fontSize:13}}>上传简历后，这里会按 AI 首轮匹配度展示候选人。</div>
       :<>
         <div style={{display:"grid",gridTemplateColumns:"1.7fr 1.3fr 0.85fr 0.9fr 0.95fr",padding:"8px 16px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4}}>
@@ -3269,30 +3271,30 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
 }
 
 // ─── SHARED COMPONENTS ───────────────────────────────────────
-const Page=({T,title,sub,children})=>(<div style={{padding:"26px 30px",maxWidth:1080,margin:"0 auto"}}><div style={{marginBottom:20,paddingBottom:14,borderBottom:`1px solid ${T.border}`}}><h1 style={{fontSize:21,fontWeight:800,color:T.text,margin:0}}>{title}</h1>{sub&&<div style={{fontSize:13,color:T.text4,marginTop:3}}>{sub}</div>}</div>{children}</div>);
-const SCard=({T,title,children})=>(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 20px",marginBottom:14}}>{title&&<div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:14,paddingBottom:10,borderBottom:`1px solid ${T.border}`}}>{title}</div>}{children}</div>);
-const cardSt=T=>({background:T.surface,border:`1px solid ${T.border}`,borderRadius:11,padding:"18px 20px",marginBottom:12});
-const ScoreSection=({T,title,children})=>(<div style={{...cardSt(T),marginBottom:12}}><div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:12,paddingBottom:7,borderBottom:`1px solid ${T.border}`}}>{title}</div>{children}</div>);
+const Page=({T,title,sub,children})=>(<div style={{padding:"30px 34px 34px",maxWidth:1180,margin:"0 auto"}}><div style={{marginBottom:24,padding:"0 0 16px",borderBottom:`1px solid ${T.border}`}}><h1 style={{fontSize:24,fontWeight:900,color:T.text,margin:0,letterSpacing:"-0.02em"}}>{title}</h1>{sub&&<div style={{fontSize:13,color:T.text4,marginTop:5,lineHeight:1.7}}>{sub}</div>}</div>{children}</div>);
+const SCard=({T,title,children})=>(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:16,boxShadow:SOFT_SHADOW}}>{title&&<div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:16,paddingBottom:12,borderBottom:`1px solid ${T.border}`}}>{title}</div>}{children}</div>);
+const cardSt=T=>({background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:14,boxShadow:SOFT_SHADOW});
+const ScoreSection=({T,title,children})=>(<div style={{...cardSt(T),marginBottom:14}}><div style={{fontSize:13,fontWeight:800,color:T.text,marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${T.border}`}}>{title}</div>{children}</div>);
 const ScoreBar=({T,label,score,max,badge,note})=>{const c=scColor(score,max||5);return(<div style={{padding:"9px 0",borderBottom:`1px solid ${T.border}`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><div style={{display:"flex",gap:7,alignItems:"center"}}><span style={{fontSize:13,color:T.text,fontWeight:500}}>{label}</span>{badge&&<Chip c={T.text3} bg={T.navActive}>{badge}</Chip>}</div><span style={{fontWeight:700,color:c,fontSize:13}}>{score}/{max}</span></div><MiniBar score={score} max={max} color={c}/>{note&&<div style={{fontSize:11,color:T.text4,marginTop:4}}>{note}</div>}</div>);};
 const MiniBar=({score,max,color})=>(<div style={{height:3,background:"#e5e7eb",borderRadius:2}}><div style={{width:`${(score/(max||5))*100}%`,height:"100%",background:color||"#111827",borderRadius:2,transition:"width 0.4s ease"}}/></div>);
-const SecLabel=({T,children})=><div style={{fontSize:11,fontWeight:800,color:T.text4,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:9,marginTop:2}}>{children}</div>;
-const Chip=({c,bg,children,lg})=><span style={{display:"inline-block",padding:lg?"5px 14px":"2px 7px",borderRadius:20,fontSize:lg?13:11,fontWeight:700,color:c,background:bg,whiteSpace:"nowrap"}}>{children}</span>;
+const SecLabel=({T,children})=><div style={{fontSize:11,fontWeight:800,color:T.text4,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10,marginTop:4}}>{children}</div>;
+const Chip=({c,bg,children,lg})=><span style={{display:"inline-block",padding:lg?"6px 14px":"4px 9px",borderRadius:999,fontSize:lg?13:11,fontWeight:700,color:c,background:bg,whiteSpace:"nowrap",border:"1px solid rgba(255,255,255,0.25)"}}>{children}</span>;
 const SBadge=({status})=>{const s=STATUS[status]||STATUS.pending;return <Chip c={s.color} bg={s.bg}>{s.label}</Chip>;};
 const Av=({name,T,size=36})=><div style={{width:size,height:size,borderRadius:"50%",background:`${T.accent}22`,color:T.accent,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:size*0.38,flexShrink:0}}>{(name||"?")[0]?.toUpperCase()}</div>;
 const Inp=({T,label,...props})=><div style={{marginBottom:9}}>{label&&<label style={lbSt(T)}>{label}</label>}<input style={inSt(T)} {...props}/></div>;
-const Empty=({T,icon,title,sub})=><div style={{textAlign:"center",padding:"56px 24px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:12}}><div style={{fontSize:32,color:T.border2,marginBottom:10}}>{icon}</div><div style={{fontSize:15,fontWeight:600,color:T.text2,marginBottom:5}}>{title}</div><div style={{fontSize:13,color:T.text4}}>{sub}</div></div>;
+const Empty=({T,icon,title,sub})=><div style={{textAlign:"center",padding:"60px 24px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,boxShadow:SOFT_SHADOW}}><div style={{fontSize:32,color:T.border2,marginBottom:10}}>{icon}</div><div style={{fontSize:15,fontWeight:700,color:T.text2,marginBottom:5}}>{title}</div><div style={{fontSize:13,color:T.text4,lineHeight:1.7}}>{sub}</div></div>;
 const ErrBox=({children})=><div style={{background:"#fef2f2",border:"1px solid #fecaca",borderRadius:7,padding:"8px 12px",fontSize:13,color:"#dc2626",marginBottom:9}}>{children}</div>;
-const BtnPrimary=({T,children,loading,disabled,onClick})=><button onClick={onClick} disabled={disabled} style={{padding:"11px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:disabled?"not-allowed":"pointer",width:"100%",opacity:disabled?0.5:1,transition:"opacity 0.1s"}}>{children}</button>;
+const BtnPrimary=({T,children,loading,disabled,onClick})=><button onClick={onClick} disabled={disabled} style={{padding:"12px 14px",background:T.accent,color:T.accentFg,border:"none",borderRadius:10,fontSize:14,fontWeight:800,cursor:disabled?"not-allowed":"pointer",width:"100%",opacity:disabled?0.5:1,transition:"opacity 0.1s, transform 0.1s"}}>{children}</button>;
 const Spin=({text})=><span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:7}}><span style={{width:13,height:13,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.7s linear infinite",display:"inline-block"}}/>{text}</span>;
 const lbSt=T=>({fontSize:11,fontWeight:600,color:T.text3,display:"block",marginBottom:5});
-const inSt=T=>({width:"100%",padding:"8px 10px",border:`1px solid ${T.border2}`,borderRadius:7,fontSize:13,color:T.text,outline:"none",boxSizing:"border-box",fontFamily:"inherit",background:T.inputBg});
+const inSt=T=>({width:"100%",padding:"10px 12px",border:`1px solid ${T.border2}`,borderRadius:10,fontSize:13,color:T.text,outline:"none",boxSizing:"border-box",fontFamily:"inherit",background:T.inputBg});
 function Css({T}) {
   return <style>{`
     @keyframes spin{to{transform:rotate(360deg)}}
     *{box-sizing:border-box;margin:0;padding:0}
     input:focus,textarea:focus,select:focus{border-color:${T.accent}!important;outline:none;box-shadow:0 0 0 3px ${T.accent}15}
     button,textarea{font-family:inherit}
-    .hr:hover{background:${T.navActive}!important}
+    .hr:hover{background:${T.navActive}!important;transform:translateY(-1px)}
     ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:${T.border2};border-radius:2px}
     details summary{list-style:none}details summary::-webkit-details-marker{display:none}
   `}</style>;
