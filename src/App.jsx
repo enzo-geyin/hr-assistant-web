@@ -1407,16 +1407,17 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       {showCompare&&<CompareModal T={T} ids={compared} cands={cands} jobs={jobs} onClose={()=>setShowCompare(false)}/>}
 
       {/* SIDEBAR */}
-      <aside style={{width:212,background:T.sidebar,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0}}>
-        <div style={{display:"flex",gap:9,alignItems:"center",padding:"18px 14px 15px",borderBottom:`1px solid ${T.border}`}}>
-          <div style={{width:32,height:32,borderRadius:7,background:T.accent,color:T.accentFg,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:12,flexShrink:0}}>HR</div>
-          <div><div style={{fontSize:13,fontWeight:800,color:T.text}}>AI 招聘助手</div><div style={{fontSize:10,color:T.text4}}>快手项目组</div></div>
+      <aside style={{width:236,background:`linear-gradient(180deg, ${T.sidebar} 0%, #f7f9fc 100%)`,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0,boxShadow:"inset -1px 0 0 rgba(255,255,255,0.02)"}}>
+        <div style={{display:"flex",gap:12,alignItems:"center",padding:"20px 16px 18px",borderBottom:`1px solid ${T.border}`,background:"rgba(255,255,255,0.72)",backdropFilter:"blur(8px)"}}>
+          <div style={{width:38,height:38,borderRadius:12,background:T.accent,color:T.accentFg,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:12,flexShrink:0,boxShadow:"0 12px 28px rgba(15,23,42,0.18)"}}>HR</div>
+          <div><div style={{fontSize:14,fontWeight:900,color:T.text}}>AI 招聘助手</div><div style={{fontSize:10,color:T.text4,marginTop:3,letterSpacing:"0.04em"}}>快手项目组</div></div>
         </div>
-        <div style={{padding:"8px 8px 0",flex:1}}>
+        <div style={{padding:"14px 12px 0",flex:1}}>
           {nav.map(n=>(
             <button key={n.id} onClick={()=>{setView(n.id);if(n.id!=="candidates")setSelCand(null);}}
-              style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"9px 10px",border:"none",background:view===n.id?T.navActive:"transparent",borderRadius:7,cursor:"pointer",fontSize:13,color:view===n.id?T.text:T.text3,fontWeight:view===n.id?700:400,marginBottom:2,textAlign:"left",transition:"all 0.1s"}}>
-              <span style={{fontSize:14,width:18,textAlign:"center"}}>{n.icon}</span>
+              style={{display:"flex",alignItems:"center",gap:11,width:"100%",padding:"12px 13px",border:view===n.id?`1px solid ${T.border}`:"1px solid transparent",background:view===n.id?"rgba(255,255,255,0.86)":"transparent",borderRadius:14,cursor:"pointer",fontSize:13,color:view===n.id?T.text:T.text3,fontWeight:view===n.id?800:500,marginBottom:7,textAlign:"left",transition:"all 0.12s ease",boxShadow:view===n.id?SOFT_SHADOW:"none",position:"relative"}}>
+              {view===n.id&&<span style={{position:"absolute",left:0,top:10,bottom:10,width:3,borderRadius:999,background:T.accent}}/>}
+              <span style={{fontSize:15,width:24,height:24,textAlign:"center",display:"inline-flex",alignItems:"center",justifyContent:"center",borderRadius:8,background:view===n.id?`${T.accent}12`:"rgba(255,255,255,0.7)",color:view===n.id?T.accent:T.text3,boxShadow:view===n.id?"none":"inset 0 0 0 1px rgba(148,163,184,0.12)"}}>{n.icon}</span>
               <span style={{flex:1}}>{n.label}</span>
               {n.id==="settings"&&needsSettingsAttention&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
@@ -1427,22 +1428,23 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
           ))}
           {compared.length>=2&&(
             <button onClick={()=>setShowCompare(true)}
-              style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"9px 10px",border:`1px solid ${T.accent}`,background:`${T.accent}12`,borderRadius:7,cursor:"pointer",fontSize:12,color:T.accent,fontWeight:700,marginTop:8}}>
+              style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"11px 12px",border:`1px solid ${T.accent}`,background:`${T.accent}12`,borderRadius:14,cursor:"pointer",fontSize:12,color:T.accent,fontWeight:800,marginTop:12,boxShadow:"0 10px 24px rgba(15,23,42,0.06)"}}>
               <span>⊞</span>对比 {compared.length} 位候选人
             </button>
           )}
-          {compared.length>0&&<button onClick={()=>setCompared([])} style={{width:"100%",padding:"4px",border:"none",background:"transparent",fontSize:11,color:T.text4,cursor:"pointer",marginTop:2}}>清除对比选择</button>}
+          {compared.length>0&&<button onClick={()=>setCompared([])} style={{width:"100%",padding:"6px",border:"none",background:"transparent",fontSize:11,color:T.text4,cursor:"pointer",marginTop:2}}>清除对比选择</button>}
         </div>
         {/* 底部：沉淀进度 + 今日用量 */}
-        <div style={{padding:"10px 14px",borderTop:`1px solid ${T.border}`}}>
+        <div style={{padding:"12px 14px 14px",borderTop:`1px solid ${T.border}`,background:"rgba(255,255,255,0.78)"}}>
           {dirStats.total>0&&(
-            <div style={{marginBottom:10,padding:"8px 10px",background:T.navActive,borderRadius:7}}>
+            <div style={{marginBottom:10,padding:"11px 12px",background:"#ffffff",borderRadius:14,border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
               <div style={{fontSize:10,color:T.text4,marginBottom:3}}>总监判断沉淀</div>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}><span style={{color:T.text3}}>{dirStats.total} 案例</span><span style={{color:T.accent,fontWeight:700}}>AI匹配 {dirStats.rate}%</span></div>
               <div style={{height:3,background:T.border2,borderRadius:2,marginTop:4}}><div style={{width:`${Math.min(dirStats.rate,100)}%`,height:"100%",background:dirStats.rate>=70?"#16a34a":"#6366f1",borderRadius:2}}/></div>
             </div>
           )}
-          <div style={{fontSize:10,color:T.text4,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:5}}>今日用量</div>
+          <div style={{padding:"11px 12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
+          <div style={{fontSize:10,color:T.text4,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:6}}>今日用量</div>
           {(()=>{
             const logs=usageLogs.filter(r=>r.date===todayStr());
             const calls=logs.reduce((s,r)=>s+r.calls,0);
@@ -1452,6 +1454,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
               <div style={{display:"flex",justifyContent:"space-between"}}><span>Token</span><span style={{color:T.text,fontWeight:600}}>{fmt(tokens)}</span></div>
             </div>);
           })()}
+          </div>
         </div>
       </aside>
 
@@ -2252,38 +2255,51 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   ];
   const dir=cand.directorVerdict;
   return(<div>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"14px 18px",marginBottom:14,display:"flex",alignItems:"center",gap:14}}>
-      <Av name={cand.name} T={T} size={42}/>
-      <div style={{flex:1}}>
-        <div style={{fontSize:17,fontWeight:800,color:T.text}}>{cand.name||"未命名候选人"}</div>
-        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||cand.screening?.roleDirection||"未绑定岗位"}</div>
-        {!cand.jobId&&job&&<div style={{fontSize:11,color:"#2563eb",marginTop:4,lineHeight:1.6}}>当前按识别岗位出题：<strong>{job.title}</strong></div>}
-        {!job&&cand.screening?.matchedJobTitle&&<div style={{fontSize:11,color:"#2563eb",marginTop:4,lineHeight:1.6}}>AI建议岗位：<strong>{cand.screening.matchedJobTitle}</strong>{cand.screening?.matchedJobReason?` · ${cand.screening.matchedJobReason}`:""}</div>}
+    <div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 20px",marginBottom:14,boxShadow:SOFT_SHADOW}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:14,alignItems:"center",minWidth:0,flex:1}}>
+          <Av name={cand.name} T={T} size={48}/>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:20,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{cand.name||"未命名候选人"}</div>
+            <div style={{fontSize:12,color:T.text3,marginTop:4}}>{job?.title||cand.screening?.roleDirection||"未绑定岗位"}</div>
+            {!cand.jobId&&job&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,lineHeight:1.6}}>当前按识别岗位出题：<strong>{job.title}</strong></div>}
+            {!job&&cand.screening?.matchedJobTitle&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,lineHeight:1.6}}>AI建议岗位：<strong>{cand.screening.matchedJobTitle}</strong>{cand.screening?.matchedJobReason?` · ${cand.screening.matchedJobReason}`:""}</div>}
+          </div>
+        </div>
+        {cand.screening&&<div style={{textAlign:"center",padding:"8px 14px",background:T.card2,borderRadius:12,border:`1px solid ${T.border}`,minWidth:88}}>
+          <div style={{fontSize:24,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1}}>{cand.screening.overallScore?.toFixed(1)}</div>
+          <div style={{fontSize:10,color:T.text4,marginTop:4}}>AI评分</div>
+        </div>}
       </div>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <button onClick={onDelete} style={{padding:"6px 10px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>删除简历</button>
-        {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"4px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
-        {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>📅 {fmtDate(cand.scheduledAt)}</span>}
-        <div style={{display:"flex",gap:8,alignItems:"center",minWidth:240}}>
-          <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"auto",minWidth:180,fontSize:12,padding:"6px 8px"}}>
+
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:14}}>
+        {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
+        {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#f5f3ff"}}>📅 {fmtDate(cand.scheduledAt)}</span>}
+        {!cand.jobId&&job&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>当前按识别岗位出题</span>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"minmax(250px,1.2fr) minmax(220px,1fr) auto",gap:12,marginTop:16,alignItems:"end"}}>
+        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
+          <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
             <option value="">未绑定岗位</option>
             {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
           </select>
-          {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{padding:"6px 10px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>套用AI匹配</button>}
+          {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
         </div>
-        <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value})} style={{...inSt(T),width:"auto",fontSize:12,padding:"6px 8px"}}>
-          {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-        </select>
-        {cand.screening&&<div style={{textAlign:"center",padding:"4px 12px",background:T.card2,borderRadius:8,border:`1px solid ${T.border}`}}>
-          <div style={{fontSize:20,fontWeight:900,color:scColor(cand.screening.overallScore)}}>{cand.screening.overallScore?.toFixed(1)}</div>
-          <div style={{fontSize:10,color:T.text4}}>AI评分</div>
-        </div>}
+        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
+          <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+            {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
+        <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
       </div>
     </div>
-    <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
-    <div style={{display:"flex",gap:0,marginBottom:14,background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:4}}>
+    <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"10px 12px",background:"#f8fafc",borderRadius:12,border:`1px solid ${T.border}`}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
+    <div style={{display:"flex",gap:6,marginBottom:16,background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:6,boxShadow:SOFT_SHADOW}}>
       {tabs.map(t=><button key={t.id}
-        style={{flex:1,padding:"7px 4px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:7,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?700:400,opacity:t.disabled?0.4:1,transition:"all 0.1s"}}
+        style={{flex:1,padding:"10px 8px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:10,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:500,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 10px 24px rgba(15,23,42,0.08)":"none"}}
         disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
     {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
@@ -2490,7 +2506,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       {[...new Set(qs.map(q=>q.step))].sort().map(step=>{
         const sq=qs.map((q,index)=>({q,index})).filter(item=>item.q.step===step);
         return(<div key={step} style={{marginBottom:18}}>
-          <div style={{fontSize:12,fontWeight:700,color:T.text2,padding:"6px 12px",background:T.navActive,borderRadius:6,marginBottom:9,borderLeft:`3px solid ${T.accent}`}}>第{step}步 · {sq[0]?.q?.stepName}</div>
+          <div style={{fontSize:12,fontWeight:800,color:T.text2,padding:"9px 14px",background:"#f8fafc",borderRadius:10,marginBottom:10,border:`1px solid ${T.border}`,borderLeft:`4px solid ${T.accent}`,boxShadow:"0 6px 18px rgba(15,23,42,0.04)"}}>第{step}步 · {sq[0]?.q?.stepName}</div>
           {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} sourceMeta={getQuestionBankSourceMeta(q, learning)} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
         </div>);
       })}
@@ -2504,7 +2520,8 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
 function QCard({T,q,sourceMeta,onFeedbackChange}) {
   const [open,setOpen]=useState(false);
   const feedbackOption = getQuestionFeedbackOption(q.feedbackTag);
-  return(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:14,marginBottom:9}}>
+  const detailRows = [["考察目标","#374151","#f9fafb",q.purpose],["好的回答","#16a34a","#f0fdf4",q.goodAnswer],["一般回答","#ca8a04","#fefce8",q.okAnswer],["差的回答","#dc2626","#fff5f5",q.badAnswer],q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],["追问方向","#4f46e5","#eef2ff",q.followUp]].filter(Boolean);
+  return(<div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:10,boxShadow:"0 12px 28px rgba(15,23,42,0.06)"}}>
     <div style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}} onClick={()=>setOpen(!open)}>
       <div style={{flex:1,marginRight:10}}>
         <div style={{display:"flex",gap:5,marginBottom:6,flexWrap:"wrap"}}>
@@ -2514,20 +2531,25 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
           {sourceMeta&&<Chip c={sourceMeta.kind==="应少问/淘汰题"?"#b91c1c":"#1d4ed8"} bg={sourceMeta.kind==="应少问/淘汰题"?"#fee2e2":"#dbeafe"}>{`来源：${sourceMeta.kind}`}</Chip>}
           {feedbackOption&&<Chip c={feedbackOption.color} bg={feedbackOption.bg}>{feedbackOption.label}</Chip>}
         </div>
-        <div style={{fontSize:14,color:T.text,fontWeight:500,lineHeight:1.5}}>{q.question}</div>
+        <div style={{fontSize:15,color:T.text,fontWeight:700,lineHeight:1.6,letterSpacing:"-0.01em"}}>{q.question}</div>
         {q.resumeEvidence&&<div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>简历锚点：{q.resumeEvidence}</div>}
       </div>
-      <span style={{fontSize:11,color:T.text4,flexShrink:0}}>{open?"▲":"▼"}</span>
+      <span style={{fontSize:11,color:T.text4,flexShrink:0,paddingTop:2}}>{open?"▲":"▼"}</span>
     </div>
     {open&&<div style={{marginTop:13,paddingTop:13,borderTop:`1px solid ${T.border}`}}>
       {sourceMeta&&<div style={{padding:"7px 9px",borderRadius:6,background:sourceMeta.kind==="应少问/淘汰题"?"#fff5f5":"#eff6ff",marginBottom:8}}>
         <span style={{fontSize:10,fontWeight:700,color:sourceMeta.kind==="应少问/淘汰题"?"#b91c1c":"#1d4ed8",marginRight:6}}>题库来源</span>
         <span style={{fontSize:12,color:"#374151"}}>{sourceMeta.text}{sourceMeta.hint?` · ${sourceMeta.hint}`:""}</span>
       </div>}
-      {[["考察目标","#374151","#f9fafb",q.purpose],["好的回答","#16a34a","#f0fdf4",q.goodAnswer],["一般回答","#ca8a04","#fefce8",q.okAnswer],["差的回答","#dc2626","#fff5f5",q.badAnswer],q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],["追问方向","#4f46e5","#eef2ff",q.followUp]].filter(Boolean).map(([l,c,bg,t])=>(
-        <div key={l} style={{padding:"7px 9px",borderRadius:6,background:bg,marginBottom:7}}><span style={{fontSize:10,fontWeight:700,color:c,marginRight:5}}>{l}</span><span style={{fontSize:13,color:"#374151",lineHeight:1.6}}>{t}</span></div>
-      ))}
-      <div style={{marginTop:12,paddingTop:12,borderTop:`1px dashed ${T.border}`}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(230px, 1fr))",gap:8}}>
+        {detailRows.map(([l,c,bg,t])=>(
+          <div key={l} style={{padding:"9px 10px",borderRadius:10,background:bg,border:"1px solid rgba(255,255,255,0.6)",minHeight:74}}>
+            <div style={{fontSize:10,fontWeight:800,color:c,marginBottom:5}}>{l}</div>
+            <div style={{fontSize:13,color:"#374151",lineHeight:1.65}}>{t}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{marginTop:12,padding:"12px",borderTop:`1px dashed ${T.border}`,background:"#fbfcfe",borderRadius:12}}>
         <div style={{fontSize:11,fontWeight:700,color:T.text2,marginBottom:8}}>题目质量反馈</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
           {QUESTION_FEEDBACK_OPTIONS.map(option=>(
@@ -2561,7 +2583,7 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
           rows={3}
           value={q.feedbackNote||""}
           onChange={e=>onFeedbackChange?.({feedbackNote:e.target.value})}
-          style={{...inSt(T),resize:"vertical",lineHeight:1.6,fontSize:12}}
+          style={{...inSt(T),resize:"vertical",lineHeight:1.6,fontSize:12,background:"#fff"}}
           placeholder="记录这道题为什么有效、重复，或需要怎样优化问法..."
         />
       </div>
@@ -3271,9 +3293,9 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
 }
 
 // ─── SHARED COMPONENTS ───────────────────────────────────────
-const Page=({T,title,sub,children})=>(<div style={{padding:"30px 34px 34px",maxWidth:1180,margin:"0 auto"}}><div style={{marginBottom:24,padding:"0 0 16px",borderBottom:`1px solid ${T.border}`}}><h1 style={{fontSize:24,fontWeight:900,color:T.text,margin:0,letterSpacing:"-0.02em"}}>{title}</h1>{sub&&<div style={{fontSize:13,color:T.text4,marginTop:5,lineHeight:1.7}}>{sub}</div>}</div>{children}</div>);
-const SCard=({T,title,children})=>(<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:16,boxShadow:SOFT_SHADOW}}>{title&&<div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:16,paddingBottom:12,borderBottom:`1px solid ${T.border}`}}>{title}</div>}{children}</div>);
-const cardSt=T=>({background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:14,boxShadow:SOFT_SHADOW});
+const Page=({T,title,sub,children})=>(<div style={{padding:"32px 36px 38px",maxWidth:1240,margin:"0 auto"}}><div style={{marginBottom:26,padding:"0 0 18px",borderBottom:`1px solid ${T.border}`}}><h1 style={{fontSize:24,fontWeight:900,color:T.text,margin:0,letterSpacing:"-0.02em"}}>{title}</h1>{sub&&<div style={{fontSize:13,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:720}}>{sub}</div>}</div>{children}</div>);
+const SCard=({T,title,children})=>(<div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:16,boxShadow:SOFT_SHADOW}}>{title&&<div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:16,paddingBottom:12,borderBottom:`1px solid ${T.border}`}}>{title}</div>}{children}</div>);
+const cardSt=T=>({background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"20px 22px",marginBottom:14,boxShadow:SOFT_SHADOW});
 const ScoreSection=({T,title,children})=>(<div style={{...cardSt(T),marginBottom:14}}><div style={{fontSize:13,fontWeight:800,color:T.text,marginBottom:12,paddingBottom:8,borderBottom:`1px solid ${T.border}`}}>{title}</div>{children}</div>);
 const ScoreBar=({T,label,score,max,badge,note})=>{const c=scColor(score,max||5);return(<div style={{padding:"9px 0",borderBottom:`1px solid ${T.border}`}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}><div style={{display:"flex",gap:7,alignItems:"center"}}><span style={{fontSize:13,color:T.text,fontWeight:500}}>{label}</span>{badge&&<Chip c={T.text3} bg={T.navActive}>{badge}</Chip>}</div><span style={{fontWeight:700,color:c,fontSize:13}}>{score}/{max}</span></div><MiniBar score={score} max={max} color={c}/>{note&&<div style={{fontSize:11,color:T.text4,marginTop:4}}>{note}</div>}</div>);};
 const MiniBar=({score,max,color})=>(<div style={{height:3,background:"#e5e7eb",borderRadius:2}}><div style={{width:`${(score/(max||5))*100}%`,height:"100%",background:color||"#111827",borderRadius:2,transition:"width 0.4s ease"}}/></div>);
