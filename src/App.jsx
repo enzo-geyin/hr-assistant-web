@@ -1371,6 +1371,9 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
   const dirDone=cands.filter(c=>c.directorVerdict?.verdict);
   const hasQuestionTaskRunning=Object.values(questionTasks).some(task=>task?.loading);
   const hasInterviewTaskRunning=Object.values(interviewTasks).some(task=>task?.loading);
+  const needsSettingsAttention = cfg.mode === "direct"
+    ? !Object.values(cfg.apiKeys||{}).some(Boolean)
+    : !String(cfg.proxyUrl||"").trim();
   const dirMatch=dirDone.filter(c=>{
     const aiRec=c.screening?.recommendation||"";
     const dir=c.directorVerdict.verdict;
@@ -1402,7 +1405,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
               style={{display:"flex",alignItems:"center",gap:9,width:"100%",padding:"9px 10px",border:"none",background:view===n.id?T.navActive:"transparent",borderRadius:7,cursor:"pointer",fontSize:13,color:view===n.id?T.text:T.text3,fontWeight:view===n.id?700:400,marginBottom:2,textAlign:"left",transition:"all 0.1s"}}>
               <span style={{fontSize:14,width:18,textAlign:"center"}}>{n.icon}</span>
               <span style={{flex:1}}>{n.label}</span>
-              {n.id==="settings"&&!Object.values(cfg.apiKeys||{}).some(Boolean)&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
+              {n.id==="settings"&&needsSettingsAttention&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
               {n.id==="jobs"&&jobComposer.jdLoading&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>识别中</span>}
               {n.id==="candidates"&&hasInterviewTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>评估中</span>}
