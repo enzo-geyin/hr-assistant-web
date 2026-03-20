@@ -469,6 +469,8 @@ const buildCandidateBiasPrompt = cand => {
   const resume = String(cand?.resume || "");
   const text = resume.toLowerCase();
   const hits = [];
+  const hasTrafficKeywords = /(投流|投放|信息流|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/.test(text);
+  const hasContentKeywords = /(编导|剪辑|脚本|拍摄|pr|ae|剪映|达芬奇|镜头|选题|前三秒|素材)/.test(text);
 
   if (/(主管|负责人|组长|leader|带团队|管理|汇报|kpi|考核|招聘|培养)/i.test(resume)) {
     hits.push(`【候选人特征：管理/组织生态位】
@@ -476,16 +478,21 @@ const buildCandidateBiasPrompt = cand => {
 - 对所有“主管/负责人/总监”类 title 保持审慎，优先通过具体管理动作核验，而不是相信头衔。`);
   }
 
-  if (/(投流|投放|信息流|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/.test(text)) {
+  if (hasTrafficKeywords) {
     hits.push(`【候选人特征：投流/效果广告经历明显】
 - 专业题优先围绕“五维数据链”、计划诊断、素材与人群适配、异常排查 SOP。
 - 必须至少有1题让他还原真实计划的数据区间，至少有1题让他解释 ROI 下滑时的排查顺序。`);
   }
 
-  if (/(编导|剪辑|脚本|拍摄|pr|ae|剪映|达芬奇|镜头|选题|前三秒|素材)/.test(text)) {
+  if (hasContentKeywords) {
     hits.push(`【候选人特征：内容/编导经历明显】
 - 专业题优先围绕内容基因、选题、前三秒、节奏设计、脚本、拍摄与后期的真实个人技能栈。
 - 必须至少有1题逼他拆解一条真实内容作品，而不是泛泛谈方法论。`);
+    if (!hasTrafficKeywords) {
+      hits.push(`【候选人特征：偏内容而非投流】
+- 不要强行追问计划级投流数据，例如整条计划的 CPM / CTR / CVR / ROI 闭环。
+- 如需追问数据，优先问素材层数据和判断依据，例如前三秒留存、完播、点击、互动、转化素材差异，以及如何判断一条素材值得继续放量或修改。`);
+    }
   }
 
   if (/(跨部门|协同|对接|产品|设计|直播|运营|销售|商务)/.test(text)) {
@@ -506,6 +513,65 @@ const buildCandidateBiasPrompt = cand => {
   return hits.join("\n\n");
 };
 
+function mergeQuestionFeedbackHistory(history = [], questions = []) {
+  const existing = Array.isArray(history) ? history : [];
+  const map = new Map(existing.map(item => [normalizeMatchText(item?.question || ""), item]));
+  (questions || []).forEach(item => {
+    if (!item?.question || !item?.feedbackTag) return;
+    const key = normalizeMatchText(item.question);
+    if (!key) return;
+    map.set(key, {
+      question: item.question,
+      feedbackTag: item.feedbackTag,
+      feedbackNote: item.feedbackNote || "",
+      principle: item.principle || "",
+      resumeEvidence: item.resumeEvidence || "",
+      updatedAt: new Date().toISOString(),
+    });
+  });
+  return Array.from(map.values())
+    .sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime())
+    .slice(0, 30);
+}
+
+function buildQuestionFeedbackGuardrails(cand, knowledge) {
+  const history = mergeQuestionFeedbackHistory(cand?.questionFeedbackHistory, cand?.questions || []);
+  const avoidFromHistory = history
+    .filter(item => ["duplicate", "invalid"].includes(item.feedbackTag))
+    .slice(0, 6);
+  const highValue = history
+    .filter(item => item.feedbackTag === "high_value")
+    .slice(0, 4);
+  const avoidFromKnowledge = Array.isArray(knowledge?.questionBank?.avoidQuestions)
+    ? knowledge.questionBank.avoidQuestions.slice(0, 4)
+    : [];
+  const noteHints = history
+    .filter(item => item.feedbackNote)
+    .slice(0, 4)
+    .map(item => `${item.question}：${item.feedbackNote}`);
+
+  const lines = [];
+  if (highValue.length || avoidFromHistory.length || avoidFromKnowledge.length || noteHints.length) {
+    lines.push("【当前题目反馈修正】");
+  }
+  if (highValue.length) {
+    lines.push(`保留这类高价值问法：${highValue.map(item => cleanListLine(item.question)).join("；")}`);
+  }
+  if (avoidFromHistory.length) {
+    lines.push(`本候选人已明确判定为重复/无效，不要再问相近问题：${avoidFromHistory.map(item => cleanListLine(item.question)).join("；")}`);
+  }
+  if (avoidFromKnowledge.length) {
+    lines.push(`岗位题库里已标记应少问/淘汰的问题：${avoidFromKnowledge.map(item => cleanListLine(item?.question || "")).filter(Boolean).join("；")}`);
+  }
+  if (noteHints.length) {
+    lines.push(`面试官补充反馈：${noteHints.join("；")}`);
+  }
+  if (avoidFromHistory.length || avoidFromKnowledge.length) {
+    lines.push("对于已判定为重复、无效或不适配的问题，不要只换个说法继续问，必须换成新的鉴别角度。");
+  }
+  return lines.join("\n");
+}
+
 const getInterviewRulesText = job => {
   const custom = String(job?.interviewRules || "").trim();
   return custom || INTERVIEW_RULES_PROMPT;
@@ -514,13 +580,14 @@ const getInterviewRulesText = job => {
 const buildQuestionPrompt = (job, cand, knowledge) => {
   const rubricCtx = formatRubricContext(knowledge);
   const bankCtx = formatQuestionBankContext(knowledge);
+  const feedbackGuardrails = buildQuestionFeedbackGuardrails(cand, knowledge);
   const roleBaselineCtx = buildRoleBaselinePrompt(job, cand);
   const candidateBiasCtx = buildCandidateBiasPrompt(cand);
   const interviewRules = getInterviewRulesText(job);
   return `岗位：${job?.title} 要求：${job?.requirements}
 简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
 风险：${JSON.stringify(cand.screening?.risks||[])}
-${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${interviewRules}
+${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${feedbackGuardrails?`${feedbackGuardrails}\n`:""}${interviewRules}
 ${roleBaselineCtx}
 ${candidateBiasCtx}
 生成10道结构化面试题，返回JSON：
@@ -2281,9 +2348,13 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
 function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learningState,questionTask,startQuestionGeneration}) {
   const loading=!!questionTask?.loading;
   const err=questionTask?.error||"";
+  const feedbackHistory = mergeQuestionFeedbackHistory(cand.questionFeedbackHistory, cand.questions || []);
   const updateQuestionFeedback=(index,patch)=>{
     const next=(cand.questions||[]).map((item,i)=>i===index?{...item,...patch}:item);
-    updCand(cand.id,{questions:next});
+    updCand(cand.id,{
+      questions:next,
+      questionFeedbackHistory:mergeQuestionFeedbackHistory(cand.questionFeedbackHistory,next),
+    });
   };
   const gen=async()=>{
     startQuestionGeneration?.(cand,job,learning);
@@ -2295,6 +2366,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入总监历史判断标准，面试题将更贴近你的用人偏好</div>}
       {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位最新规则与题库，当前先按岗位要求生成面试题</div>}
       {!learningState?.loading&&formatQuestionBankContext(learning)&&<div style={{fontSize:11,color:"#0f766e",marginBottom:10,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载学习后的题库偏好，面试题会优先覆盖高区分度问题和风险排查</div>}
+      {!!feedbackHistory.length&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:10,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 本候选人上一轮题目反馈已生效：重复/无效题会被避开，高价值题会优先保留相近问法。</div>}
       {loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:10,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 面试题正在后台生成中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
       {err&&<ErrBox>{err}</ErrBox>}
       <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
@@ -2310,7 +2382,10 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
           {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} sourceMeta={getQuestionBankSourceMeta(q, learning)} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
         </div>);
       })}
-      <button onClick={()=>updCand(cand.id,{questions:null})} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
+      <button onClick={()=>updCand(cand.id,{
+        questions:null,
+        questionFeedbackHistory:mergeQuestionFeedbackHistory(cand.questionFeedbackHistory,cand.questions||[]),
+      })} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
     </div>)}
   </div>);
 }
