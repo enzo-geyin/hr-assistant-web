@@ -1078,13 +1078,13 @@ const getScoreBand = score => {
 const getCandidateStatusFromScore = score => getScoreBand(score).status;
 const DASHBOARD_SCORE_GUIDE = {
   t0: [
-    { label: "2年以上短视频 / 内容投放经验", level: "中" },
-    { label: "熟练使用剪映、PR、AE 等剪辑软件", level: "高" },
-    { label: "熟悉平台投放逻辑与基础复盘方法", level: "高" },
-    { label: "具备基础文案与内容包装能力", level: "低" },
-    { label: "有短视频付费投放经验", level: "中" },
-    { label: "自己运营过账号或作品号", level: "中" },
-    { label: "有 IP / 作品输出节奏感", level: "低" },
+    { label: "过去经历与目标岗位方向基本一致", level: "高" },
+    { label: "具备该岗位最核心的基础技能或实操经验", level: "高" },
+    { label: "做过可验证的真实项目，而非只停留在辅助或学习阶段", level: "高" },
+    { label: "能说清自己的职责边界、产出结果和复盘方法", level: "中" },
+    { label: "工作稳定性、履历连续性没有明显硬伤", level: "中" },
+    { label: "薪资、城市、到岗时间等现实条件基本可谈", level: "中" },
+    { label: "没有明显造假、严重注水或完全错配信号", level: "高" },
   ],
   t1: [
     { label: "目标导向", weight: "30%", note: "结果优先，能围绕业务目标推进任务" },
@@ -1092,14 +1092,15 @@ const DASHBOARD_SCORE_GUIDE = {
     { label: "反馈迭代", weight: "15%", note: "能根据数据和反馈快速修正方案" },
     { label: "团队协作", weight: "10%", note: "跨团队沟通顺畅，推进配合有效" },
     { label: "学习能力", weight: "10%", note: "新工具、新打法上手快" },
-    { label: "审美", weight: "10%", note: "内容质感、画面与表达在线" },
+    { label: "专业判断", weight: "10%", note: "能说清方法、标准和判断依据" },
     { label: "自驱力", weight: "10%", note: "主动推进问题闭环" },
     { label: "价值观契合", weight: "5%", note: "与团队工作方式和要求匹配" },
   ],
   t2: [
-    "有爆款短视频案例或内容操盘经验",
-    "会基础数据统计与分析复盘",
-    "有自运营账号或持续内容输出经历",
+    "有跨岗位协同或带人推进经验",
+    "会数据复盘、流程优化或方法沉淀",
+    "有持续输出作品、项目成果或行业案例",
+    "有跨平台、跨行业或从0到1的实战经历",
   ],
 };
 const fmt=n=>n?.toLocaleString()||"0";
@@ -1601,8 +1602,8 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
     {/* 板块3：评分标准 */}
     <SecLabel T={T}>评分标准</SecLabel>
     <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 18px 16px",marginBottom:14}}>
-      <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>评分拆解（按你提供的评分表整理）</div>
-      <div style={{fontSize:12,color:T.text4,lineHeight:1.8,marginBottom:16}}>先看 T0 / T1 / T2 具体考察什么，再用下面的总分档位判断候选人是合格、待定还是淘汰。</div>
+      <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>评分拆解（通用版）</div>
+      <div style={{fontSize:12,color:T.text4,lineHeight:1.8,marginBottom:16}}>先看 T0 / T1 / T2 具体考察什么。T0 现在代表“是否具备进入评估池的最低岗位匹配”，再用下面的总分档位判断候选人是合格、待定还是淘汰。</div>
 
       <div style={{marginBottom:16}}>
         <div style={{fontSize:11,fontWeight:800,color:T.text4,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>T0 硬性条件</div>
