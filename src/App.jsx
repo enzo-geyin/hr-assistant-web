@@ -2224,7 +2224,9 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
+  const [showResumePreview,setShowResumePreview]=useState(true);
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
+  const previewResume=(cand?.resume||"").trim();
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
@@ -2302,6 +2304,33 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       </div>
     </div>
     <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"10px 12px",background:"#f8fafc",borderRadius:12,border:`1px solid ${T.border}`}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
+    {previewResume&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:T.text}}>简历预览</div>
+          <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>
+            {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
+          </div>
+        </div>
+        <button
+          onClick={()=>setShowResumePreview(prev=>!prev)}
+          style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:700}}
+        >
+          {showResumePreview?"收起预览":"展开预览"}
+        </button>
+      </div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
+        {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
+        {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
+      </div>
+      {cand.screening?.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:10,marginBottom:10}}>
+        <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
+      </div>}
+      {showResumePreview&&<div style={{fontSize:12,color:T.text2,lineHeight:1.8,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:240,overflow:"auto"}}>
+        {previewResume}
+      </div>}
+    </div>}
     <div style={{display:"flex",gap:6,marginBottom:16,background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:6,boxShadow:SOFT_SHADOW}}>
       {tabs.map(t=><button key={t.id}
         style={{flex:1,padding:"10px 8px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:10,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:500,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 10px 24px rgba(15,23,42,0.08)":"none"}}
