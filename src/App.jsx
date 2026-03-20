@@ -981,6 +981,38 @@ const extractPdfText = async file => {
   return normalizeExtractedText(ocrTexts.join("\n\n"));
 };
 
+const fileToDataUrl = file => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ""));
+  reader.onerror = () => reject(new Error("文件预览读取失败"));
+  reader.readAsDataURL(file);
+});
+
+const createResumeVisualPreview = async file => {
+  const kind = getFileKind(file);
+  if (kind === "image") {
+    return {
+      kind: "image",
+      src: await fileToDataUrl(file),
+      name: file.name,
+    };
+  }
+  if (kind === "pdf") {
+    const pdfjsLib = await loadPdfJs();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    const page = await pdf.getPage(1);
+    const canvas = await renderPdfPageToCanvas(page, 1.35);
+    return {
+      kind: "pdf",
+      src: canvas.toDataURL("image/jpeg", 0.92),
+      name: file.name,
+      pageCount: pdf.numPages,
+    };
+  }
+  return null;
+};
+
 const extractFileText = async file => {
   const kind = getFileKind(file);
   if (kind==="text") return normalizeExtractedText(await file.text());
@@ -1065,6 +1097,7 @@ async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "", j
 }
 
 async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [] }) {
+  const resumePreview = await createResumeVisualPreview(file).catch(() => null);
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
@@ -1077,6 +1110,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       status: getCandidateStatusFromScore(screening.overallScore),
       resume: normalizedResume,
       resumeFileName: file.name,
+      resumePreview,
       screening,
       questions: null,
       interviews: [],
@@ -2269,6 +2303,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
   const resumeKeywordHits=extractRoleKeywordHits(previewResume);
+  const visualPreview=cand?.resumePreview;
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
@@ -2372,9 +2407,24 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       {cand.screening?.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:10,marginBottom:10}}>
         <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
       </div>}
-      {showResumePreview&&<div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
-        {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
-      </div>}
+      {showResumePreview&&(
+        visualPreview?.src
+          ? <div style={{padding:"12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10}}>
+              <div style={{fontSize:11,color:T.text4,marginBottom:10}}>
+                {visualPreview.kind==="pdf"
+                  ? `直观预览：PDF 第1页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
+                  : "直观预览：原始图片"}
+              </div>
+              <img
+                src={visualPreview.src}
+                alt={cand.resumeFileName||"简历预览"}
+                style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc"}}
+              />
+            </div>
+          : <div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
+              {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
+            </div>
+      )}
     </div>}
     <div style={{display:"flex",gap:6,marginBottom:16,background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:6,boxShadow:SOFT_SHADOW}}>
       {tabs.map(t=><button key={t.id}
@@ -2443,8 +2493,10 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
     if(resumeFile){
       setErr("");setLoading(true);
       try{
+        const resumePreview = await createResumeVisualPreview(resumeFile).catch(() => null);
         const extractedResume = await extractFileText(resumeFile);
         await analyzeExtractedResume(extractedResume,resumeFile.name);
+        updCand(cand.id,{resumePreview});
       }catch(e){setErr(e.message);}
       setLoading(false);
       return;
