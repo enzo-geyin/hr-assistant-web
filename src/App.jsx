@@ -387,16 +387,73 @@ const buildJobOptionsContext = jobs => {
   return items.length ? `候选岗位列表：\n${items.join("\n")}` : "";
 };
 
-const resolveMatchedJob = (jobs, matchedTitle = "") => {
-  const target = cleanListLine(matchedTitle || "").toLowerCase();
-  if (!target) return null;
-  const exact = (jobs || []).find(job => cleanListLine(job?.title || "").toLowerCase() === target);
-  if (exact) return exact;
-  const fuzzy = (jobs || []).find(job => {
-    const title = cleanListLine(job?.title || "").toLowerCase();
-    return title && (title.includes(target) || target.includes(title));
+const extractRoleKeywords = text => {
+  const src = String(text || "").toLowerCase();
+  const groups = [
+    ["店铺运营", /(店铺运营|店务运营|店铺管理|店铺后台|电商运营|淘系运营|快手店铺|抖音店铺|商品运营|店铺店务|商城运营)/g],
+    ["短视频编导", /(编导|短视频|脚本|选题|内容策划|导演|内容组)/g],
+    ["剪辑后期", /(剪辑|后期|pr|ae|剪映|达芬奇|包装|调色)/g],
+    ["拍摄执行", /(拍摄|摄影|机位|打光|收音|器材)/g],
+    ["信息流投放", /(信息流|投流|投放|优化师|买量|roi|cpm|ctr|cvr|账户|出价|人群包|计划)/g],
+    ["直播运营", /(直播运营|中控|场控|直播间|主播|排品|千川|直播投流)/g],
+    ["内容运营", /(内容运营|内容增长|新媒体|种草|小红书|公众号|社媒运营)/g],
+  ];
+  return groups
+    .filter(([, re]) => re.test(src))
+    .map(([label]) => label);
+};
+
+const scoreJobMatch = (job, screening = {}, resumeText = "") => {
+  const title = cleanListLine(job?.title || "").toLowerCase();
+  const pool = `${job?.title||""}\n${job?.requirements||""}\n${job?.t0||""}\n${job?.t1||""}`.toLowerCase();
+  const matchedTitle = cleanListLine(screening?.matchedJobTitle || "").toLowerCase();
+  const matchedReason = String(screening?.matchedJobReason || "").toLowerCase();
+  const roleDirection = String(screening?.roleDirection || "").toLowerCase();
+  const sourceText = `${matchedTitle}\n${matchedReason}\n${roleDirection}\n${resumeText}`.toLowerCase();
+
+  let score = 0;
+  if (matchedTitle && title === matchedTitle) score += 100;
+  else if (matchedTitle && (title.includes(matchedTitle) || matchedTitle.includes(title))) score += 60;
+
+  const jobKeywords = extractRoleKeywords(pool);
+  const candidateKeywords = extractRoleKeywords(sourceText);
+  jobKeywords.forEach(keyword => {
+    if (candidateKeywords.includes(keyword)) score += 18;
+    else if (sourceText.includes(keyword.toLowerCase())) score += 10;
   });
-  return fuzzy || null;
+
+  const titleTokens = title.split(/[·/\-\s]+/).map(cleanListLine).filter(Boolean);
+  titleTokens.forEach(token => {
+    if (token.length < 2) return;
+    if (sourceText.includes(token)) score += 8;
+  });
+
+  if (matchedReason && title && matchedReason.includes(title)) score += 14;
+  return score;
+};
+
+const resolveMatchedJob = (jobs, screening = {}, resumeText = "") => {
+  if (!Array.isArray(jobs) || !jobs.length) return null;
+  const matchedTitle = cleanListLine(screening?.matchedJobTitle || "").toLowerCase();
+  if (matchedTitle) {
+    const exact = jobs.find(job => cleanListLine(job?.title || "").toLowerCase() === matchedTitle);
+    if (exact) return exact;
+    const fuzzy = jobs.find(job => {
+      const title = cleanListLine(job?.title || "").toLowerCase();
+      return title && (title.includes(matchedTitle) || matchedTitle.includes(title));
+    });
+    if (fuzzy) return fuzzy;
+  }
+  const ranked = jobs
+    .map(job => ({ job, score: scoreJobMatch(job, screening, resumeText) }))
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.score > 0 ? ranked[0].job : null;
+};
+
+const getEffectiveCandidateJob = (jobs, cand) => {
+  const bound = (jobs || []).find(job => job.id === cand?.jobId);
+  if (bound) return bound;
+  return resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
 };
 
 const buildScreeningPrompt = (job, resume, learningCtx="", jobOptions=[]) => {
@@ -416,12 +473,16 @@ ${genericJobMatching?`\n${genericJobMatching}`:""}
 ${!job?.title && !job?.requirements && jobOptions.length?`\n${buildJobOptionsContext(jobOptions)}`:""}
 ${learningCtx?`\n${learningCtx}`:""}
 薪酬：${job?.salary||"不限"} 简历：${resume}
-输出JSON：{"candidateName":"候选人姓名（如能识别）","matchedJobTitle":"最匹配的岗位名称；若都不匹配则留空","matchedJobReason":"为什么匹配这个岗位，或为什么不匹配任何岗位","matchedJobConfidence":"高|中|低","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
+输出JSON：{"candidateName":"候选人姓名（如能识别）","roleDirection":"候选人更偏向的岗位方向，例如店铺运营/短视频编导/信息流投放/剪辑后期","matchedJobTitle":"最匹配的岗位名称；若都不匹配则留空","matchedJobReason":"为什么匹配这个岗位，或为什么不匹配任何岗位","matchedJobConfidence":"高|中|低","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
 "t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
 "t1":{"items":[{"dimension":"维度","note":"依据","score":4,"maxScore":5}]},
 "t2":{"items":[{"item":"加分项","has":true,"note":"依据"}]},
 "fineScreen":{"education":{"score":3,"maxScore":5,"note":""},"industryRisk":{"score":3,"maxScore":5,"note":""},"tenureMatch":{"score":4,"maxScore":5,"note":""},"salaryReason":{"score":5,"maxScore":5,"note":""}},
-"risks":["风险1"]}`;
+"risks":["风险1"]}
+要求：
+1. roleDirection 必须根据候选人过去真实做过的岗位来判断，不能泛泛写成“运营”。
+2. 如果候选人更偏内容/编导/剪辑，就不要匹配到投流岗；如果更偏店铺运营，就不要误匹配到内容岗。
+3. matchedJobReason 要明确说明你是根据哪些经历、产品、工具、产出和结果做出的岗位判断。`;
 };
 
 const INTERVIEW_RULES_PROMPT = `【面试题生成准则】
@@ -433,7 +494,7 @@ const INTERVIEW_RULES_PROMPT = `【面试题生成准则】
 6. 必须覆盖过去做过的产品、人群、流量选择：追问他做过什么产品、打什么人群、选什么流量、为什么这么选、效果如何复盘。`;
 
 const buildRoleBaselinePrompt = (job, cand) => {
-  const corpus = `${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`.toLowerCase();
+  const corpus = `${job?.title||""}\n${job?.requirements||""}\n${cand?.screening?.roleDirection||""}\n${cand?.resume||""}`.toLowerCase();
   const blocks = [];
   const hasTrafficKeywords = /(投流|投手|信息流|优化师|买量|roi|cpm|ctr|cvr|消耗|投放)/.test(corpus);
   const hasContentKeywords = /(编导|剪辑|短视频|脚本|拍摄|pr|ae|剪映|达芬奇|内容策划|素材)/.test(corpus);
@@ -513,6 +574,36 @@ const buildCandidateBiasPrompt = cand => {
   return hits.join("\n\n");
 };
 
+const CONTENT_ROLE_RE = /(编导|剪辑|短视频|脚本|拍摄|内容策划|内容组|素材|导演|摄影|后期|视频)/i;
+const TRAFFIC_ROLE_RE = /(投流|投放|信息流|投手|优化师|买量|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/i;
+const PLAN_METRIC_QUESTION_RE = /(cpm|ctr|cvr|roi|投放计划|计划数据|计划的|计划层|出价|人群包|账户消耗|整条计划|五维数据链)/i;
+
+const isContentRole = (job, cand) => CONTENT_ROLE_RE.test(`${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`);
+const isTrafficRole = (job, cand) => TRAFFIC_ROLE_RE.test(`${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`);
+
+const rewriteToContentMetricsQuestion = question => ({
+  ...question,
+  tag: question?.tag || "专业能力",
+  subTag: "素材数据判断",
+  principle: question?.principle || "内容岗位匹配",
+  question: "请回忆一条你过去主导的素材，具体看哪些数据判断它值得继续放量或修改？这些数据分别说明了什么？",
+  purpose: "核验内容岗是否真的懂素材层数据与判断逻辑，而不是套投放计划指标",
+  goodAnswer: "能结合真实素材说明前三秒、完播、点击、互动或转化差异，以及对应修改动作",
+  okAnswer: "知道会看部分素材数据，但判断逻辑和修改动作不够完整",
+  badAnswer: "只会泛谈 ROI、CPM 等计划指标，说不清素材层数据",
+  redFlag: "把内容岗问题答成投流计划复盘，缺少素材判断与优化动作",
+  followUp: "追问某条素材从初版到优化版，具体哪组数据变化让你决定继续放量或改脚本",
+});
+
+const normalizeGeneratedQuestionsForRole = (questions, job, cand) => {
+  const contentOnly = isContentRole(job, cand) && !isTrafficRole(job, cand);
+  if (!contentOnly) return questions;
+  return (questions || []).map(question => {
+    if (!PLAN_METRIC_QUESTION_RE.test(String(question?.question || ""))) return question;
+    return rewriteToContentMetricsQuestion(question);
+  });
+};
+
 function mergeQuestionFeedbackHistory(history = [], questions = []) {
   const existing = Array.isArray(history) ? history : [];
   const map = new Map(existing.map(item => [normalizeMatchText(item?.question || ""), item]));
@@ -578,13 +669,14 @@ const getInterviewRulesText = job => {
 };
 
 const buildQuestionPrompt = (job, cand, knowledge) => {
+  const roleLabel = job?.title || cand?.screening?.roleDirection || "待识别岗位";
   const rubricCtx = formatRubricContext(knowledge);
   const bankCtx = formatQuestionBankContext(knowledge);
   const feedbackGuardrails = buildQuestionFeedbackGuardrails(cand, knowledge);
   const roleBaselineCtx = buildRoleBaselinePrompt(job, cand);
   const candidateBiasCtx = buildCandidateBiasPrompt(cand);
   const interviewRules = getInterviewRulesText(job);
-  return `岗位：${job?.title} 要求：${job?.requirements}
+  return `岗位：${roleLabel} 要求：${job?.requirements||""}
 简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
 风险：${JSON.stringify(cand.screening?.risks||[])}
 ${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${feedbackGuardrails?`${feedbackGuardrails}\n`:""}${interviewRules}
@@ -600,7 +692,8 @@ ${candidateBiasCtx}
 4. 所有问题必须指向候选人的真实过往案例，默认使用“请回忆一次你过去...” “你当时具体怎么做的...” 这样的问法。
 5. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
 6. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
-7. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。`;
+7. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。
+8. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。`;
 };
 
 const normalizeQuestionsPayload = payload => {
@@ -934,7 +1027,7 @@ async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "", j
 async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [] }) {
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
-  const matchedJob = job || resolveMatchedJob(jobs, screening?.matchedJobTitle);
+  const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
   const candidateName = name.trim() || screening.candidateName || "未命名";
   return {
     candidate: {
@@ -1151,7 +1244,7 @@ export default function App() {
         {maxTokens:3000}
       );
       if(res.error) throw new Error(res.raw||res.error);
-      const questions=normalizeQuestionsPayload(res);
+      const questions=normalizeGeneratedQuestionsForRole(normalizeQuestionsPayload(res), job, candidate);
       if(!questions.length) throw new Error("模型已返回内容，但没有识别到有效的面试题列表");
       updCand(candidate.id,{questions});
       setQuestionTasks(prev=>{
@@ -1940,7 +2033,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
 function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate}) {
   const cand=cands.find(c=>c.id===selCand);
-  const job=jobs.find(j=>j.id===cand?.jobId);
+  const job=getEffectiveCandidateJob(jobs,cand);
   const [showImport,setShowImport]=useState(false);
   const deleteCandidate=candidate=>{
     if(!candidate) return;
@@ -1969,7 +2062,8 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
         <div style={{overflowY:"auto",maxHeight:"calc(100vh - 160px)"}}>
           {cands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>暂无候选人</div>
           :cands.map(c=>{
-            const j=jobs.find(j=>j.id===c.jobId);
+            const boundJob=jobs.find(j=>j.id===c.jobId);
+            const effectiveJob=getEffectiveCandidateJob(jobs,c);
             const isCmp=compared.includes(c.id);
             return(<div key={c.id} style={{padding:"10px 12px",borderBottom:`1px solid ${T.border}`,background:selCand===c.id?T.navActive:"transparent",borderLeft:selCand===c.id?`3px solid ${T.accent}`:"3px solid transparent",cursor:"pointer",transition:"all 0.1s"}} onClick={()=>setSelCand(c.id)}>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -1980,8 +2074,9 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
                 <Av name={c.name} T={T} size={30}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
-                  <div style={{fontSize:11,color:T.text4,marginTop:1}}>{j?.title||"未绑定岗位"}</div>
-                  {!j&&c.screening?.matchedJobTitle&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</div>}
+                  <div style={{fontSize:11,color:T.text4,marginTop:1}}>{effectiveJob?.title||c.screening?.roleDirection||"未绑定岗位"}</div>
+                  {!boundJob&&effectiveJob&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI已识别岗位</div>}
+                  {!effectiveJob&&c.screening?.matchedJobTitle&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</div>}
                   {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700}}>面试评估后台运行中</div>}
                   {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
                 </div>
@@ -2105,7 +2200,7 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
 function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
-  const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening?.matchedJobTitle);
+  const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
@@ -2145,7 +2240,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       <Av name={cand.name} T={T} size={42}/>
       <div style={{flex:1}}>
         <div style={{fontSize:17,fontWeight:800,color:T.text}}>{cand.name||"未命名候选人"}</div>
-        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||"未绑定岗位"}</div>
+        <div style={{fontSize:12,color:T.text3,marginTop:2}}>{job?.title||cand.screening?.roleDirection||"未绑定岗位"}</div>
+        {!cand.jobId&&job&&<div style={{fontSize:11,color:"#2563eb",marginTop:4,lineHeight:1.6}}>当前按识别岗位出题：<strong>{job.title}</strong></div>}
         {!job&&cand.screening?.matchedJobTitle&&<div style={{fontSize:11,color:"#2563eb",marginTop:4,lineHeight:1.6}}>AI建议岗位：<strong>{cand.screening.matchedJobTitle}</strong>{cand.screening?.matchedJobReason?` · ${cand.screening.matchedJobReason}`:""}</div>}
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
