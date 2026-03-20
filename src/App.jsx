@@ -2384,9 +2384,11 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     {previewResume&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:14,fontWeight:800,color:T.text}}>简历预览</div>
+          <div style={{fontSize:14,fontWeight:800,color:T.text}}>{visualPreview?.src?"简历版式预览":"简历识别文本"}</div>
           <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>
             {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
+            {!visualPreview?.src&&cand.resumeFileName?" · 当前未保存原始版式预览":""
+            }
           </div>
         </div>
         <button
@@ -2421,8 +2423,14 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
                 style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc"}}
               />
             </div>
-          : <div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
-              {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
+          : <div>
+              <div style={{fontSize:11,color:"#92400e",marginBottom:10,padding:"10px 12px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,lineHeight:1.7}}>
+                当前这份候选人没有保存到上传时的原始版式预览，所以这里展示的是识别后的文本，不是 PDF / 图片原样。
+                如果你想看直观版式，需要重新上传一次原始简历文件。
+              </div>
+              <div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
+                {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
+              </div>
             </div>
       )}
     </div>}
