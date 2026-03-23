@@ -2299,6 +2299,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const [showResumePreview,setShowResumePreview]=useState(true);
+  const [showPreviewLightbox,setShowPreviewLightbox]=useState(false);
+  const [previewZoom,setPreviewZoom]=useState(1);
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
@@ -2339,6 +2341,39 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   ];
   const dir=cand.directorVerdict;
   return(<div>
+    {showPreviewLightbox&&visualPreview?.src&&<div
+      onClick={()=>setShowPreviewLightbox(false)}
+      style={{position:"fixed",inset:0,zIndex:260,background:"rgba(15,23,42,0.74)",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}
+    >
+      <div
+        onClick={e=>e.stopPropagation()}
+        style={{width:"min(96vw, 1280px)",height:"min(92vh, 980px)",background:"#0f172a",borderRadius:18,boxShadow:"0 32px 100px rgba(15,23,42,0.4)",display:"flex",flexDirection:"column",overflow:"hidden"}}
+      >
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)",color:"#e2e8f0",gap:12}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cand.resumeFileName||"简历预览"}</div>
+            <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>
+              {visualPreview.kind==="pdf"
+                ? `PDF 第1页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
+                : "原始图片预览"}
+            </div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <button onClick={()=>setPreviewZoom(z=>Math.max(0.8, Number((z-0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>缩小</button>
+            <button onClick={()=>setPreviewZoom(1)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>100%</button>
+            <button onClick={()=>setPreviewZoom(z=>Math.min(3, Number((z+0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>放大</button>
+            <button onClick={()=>setShowPreviewLightbox(false)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"#fff",color:"#111827",cursor:"pointer",fontSize:13,fontWeight:800}}>关闭</button>
+          </div>
+        </div>
+        <div style={{flex:1,overflow:"auto",padding:20,display:"flex",justifyContent:"center",alignItems:"flex-start",background:"#111827"}}>
+          <img
+            src={visualPreview.src}
+            alt={cand.resumeFileName||"简历预览"}
+            style={{display:"block",width:`${Math.round(previewZoom*100)}%`,maxWidth:"none",height:"auto",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",background:"#fff"}}
+          />
+        </div>
+      </div>
+    </div>}
     <div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 20px",marginBottom:14,boxShadow:SOFT_SHADOW}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
         <div style={{display:"flex",gap:14,alignItems:"center",minWidth:0,flex:1}}>
@@ -2412,15 +2447,19 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       {showResumePreview&&(
         visualPreview?.src
           ? <div style={{padding:"12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10}}>
-              <div style={{fontSize:11,color:T.text4,marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
+                <div style={{fontSize:11,color:T.text4}}>
                 {visualPreview.kind==="pdf"
                   ? `直观预览：PDF 第1页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
                   : "直观预览：原始图片"}
+                </div>
+                <button onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}} style={{padding:"7px 11px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800}}>点击放大查看</button>
               </div>
               <img
                 src={visualPreview.src}
                 alt={cand.resumeFileName||"简历预览"}
-                style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc"}}
+                onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
+                style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
               />
             </div>
           : <div>
