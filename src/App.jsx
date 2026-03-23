@@ -991,21 +991,29 @@ const fileToDataUrl = file => new Promise((resolve, reject) => {
 const createResumeVisualPreview = async file => {
   const kind = getFileKind(file);
   if (kind === "image") {
+    const src = await fileToDataUrl(file);
     return {
       kind: "image",
-      src: await fileToDataUrl(file),
+      src,
+      pages: [src],
       name: file.name,
+      pageCount: 1,
     };
   }
   if (kind === "pdf") {
     const pdfjsLib = await loadPdfJs();
     const data = new Uint8Array(await file.arrayBuffer());
     const pdf = await pdfjsLib.getDocument({ data }).promise;
-    const page = await pdf.getPage(1);
-    const canvas = await renderPdfPageToCanvas(page, 1.35);
+    const pages = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const canvas = await renderPdfPageToCanvas(page, 1.35);
+      pages.push(canvas.toDataURL("image/jpeg", 0.92));
+    }
     return {
       kind: "pdf",
-      src: canvas.toDataURL("image/jpeg", 0.92),
+      src: pages[0] || "",
+      pages,
       name: file.name,
       pageCount: pdf.numPages,
     };
@@ -2301,15 +2309,23 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const [showResumePreview,setShowResumePreview]=useState(true);
   const [showPreviewLightbox,setShowPreviewLightbox]=useState(false);
   const [previewZoom,setPreviewZoom]=useState(1);
+  const [previewPage,setPreviewPage]=useState(0);
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
   const resumeKeywordHits=extractRoleKeywordHits(previewResume);
   const visualPreview=cand?.resumePreview;
+  const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
+  const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
   };
+  useEffect(()=>{
+    setPreviewPage(0);
+    setPreviewZoom(1);
+    setShowPreviewLightbox(false);
+  },[cand?.id, visualPreview?.src]);
   const refreshLearning=async()=>{
     if(!job?.id){setLearning({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});setLearningState({loading:false,error:""});return;}
     setLearningState({loading:true,error:""});
@@ -2341,7 +2357,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   ];
   const dir=cand.directorVerdict;
   return(<div>
-    {showPreviewLightbox&&visualPreview?.src&&<div
+    {showPreviewLightbox&&currentPreviewSrc&&<div
       onClick={()=>setShowPreviewLightbox(false)}
       style={{position:"fixed",inset:0,zIndex:260,background:"rgba(15,23,42,0.74)",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}
     >
@@ -2354,11 +2370,15 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             <div style={{fontSize:14,fontWeight:800,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cand.resumeFileName||"简历预览"}</div>
             <div style={{fontSize:11,color:"#94a3b8",marginTop:4}}>
               {visualPreview.kind==="pdf"
-                ? `PDF 第1页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
+                ? `PDF 第${previewPage+1}页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
                 : "原始图片预览"}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            {visualPreview.kind==="pdf"&&previewPages.length>1&&<>
+              <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage===0?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
+              <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
+            </>}
             <button onClick={()=>setPreviewZoom(z=>Math.max(0.8, Number((z-0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>缩小</button>
             <button onClick={()=>setPreviewZoom(1)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>100%</button>
             <button onClick={()=>setPreviewZoom(z=>Math.min(3, Number((z+0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>放大</button>
@@ -2367,7 +2387,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         </div>
         <div style={{flex:1,overflow:"auto",padding:20,display:"flex",justifyContent:"center",alignItems:"flex-start",background:"#111827"}}>
           <img
-            src={visualPreview.src}
+            src={currentPreviewSrc}
             alt={cand.resumeFileName||"简历预览"}
             style={{display:"block",width:`${Math.round(previewZoom*100)}%`,maxWidth:"none",height:"auto",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",background:"#fff"}}
           />
@@ -2445,18 +2465,24 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
       </div>}
       {showResumePreview&&(
-        visualPreview?.src
+        currentPreviewSrc
           ? <div style={{padding:"12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
                 <div style={{fontSize:11,color:T.text4}}>
                 {visualPreview.kind==="pdf"
-                  ? `直观预览：PDF 第1页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
+                  ? `直观预览：PDF 第${previewPage+1}页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
                   : "直观预览：原始图片"}
                 </div>
-                <button onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}} style={{padding:"7px 11px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800}}>点击放大查看</button>
+                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                  {visualPreview.kind==="pdf"&&previewPages.length>1&&<>
+                    <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage===0?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
+                    <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
+                  </>}
+                  <button onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}} style={{padding:"7px 11px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800}}>点击放大查看</button>
+                </div>
               </div>
               <img
-                src={visualPreview.src}
+                src={currentPreviewSrc}
                 alt={cand.resumeFileName||"简历预览"}
                 onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
                 style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
