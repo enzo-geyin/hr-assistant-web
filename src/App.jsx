@@ -1193,6 +1193,8 @@ const SOFT_SHADOW="0 10px 30px rgba(15,23,42,0.06)";
 const CARD_RADIUS=16;
 const EMPTY_JOB_FORM=()=>({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
 const EMPTY_JOB_COMPOSER=()=>({open:false,form:EMPTY_JOB_FORM(),jdFileName:"",jdLoading:false,jdErr:"",parsedJobs:[],activeParsedJob:0,taskId:null});
+const EMPTY_DASHBOARD_UPLOAD=()=>({files:[],loading:false,err:"",info:"",taskId:null});
+const dashboardFileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
 const normalizeJobLevel = level => cleanListLine(level || "").toLowerCase();
 const isSingleRoundLevel = level => /(专员|组长|主管)/.test(normalizeJobLevel(level)) && !/(经理|总监)/.test(normalizeJobLevel(level));
 const getInterviewRoundsForJob = job => isSingleRoundLevel(job?.level) ? ["一面"] : ["一面","二面","三面","终面","HR面"];
@@ -1211,6 +1213,7 @@ export default function App() {
   const [cands,setCands]=useState(()=>load("hr_cands",[]));
   const [usageLogs,setUsageLogs]=useState(()=>load("hr_usage",[]));
   const [jobComposer,setJobComposer]=useState(EMPTY_JOB_COMPOSER);
+  const [dashboardUpload,setDashboardUpload]=useState(EMPTY_DASHBOARD_UPLOAD);
   const [questionTasks,setQuestionTasks]=useState({});
   const [interviewTasks,setInterviewTasks]=useState({});
   const [view,setView] =useState("dashboard");
@@ -1317,6 +1320,51 @@ export default function App() {
       return next;
     });
     if(selCand===cid) setSelCand(null);
+  };
+  const startDashboardResumeImport=async()=>{
+    if(!dashboardUpload.files?.length) return;
+    const taskId=`dashboard-upload-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    setDashboardUpload(prev=>({
+      ...prev,
+      loading:true,
+      err:"",
+      info:"",
+      taskId,
+      startedAt:Date.now(),
+    }));
+    const created=[];
+    const failed=[];
+    const failedKeys=new Set();
+    for(const file of dashboardUpload.files){
+      try{
+        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs});
+        created.push(candidate);
+      }catch(error){
+        failed.push(`${file.name}：${error?.message||"识别失败"}`);
+        failedKeys.add(dashboardFileKey(file));
+      }
+    }
+    if(created.length){
+      setCands(prev=>[...created,...prev]);
+    }
+    setDashboardUpload(prev=>{
+      if(prev.taskId!==taskId) return prev;
+      const summary=created.reduce((acc,candidate)=>{
+        const label=getScoreBand(candidate.screening?.overallScore).label;
+        if(label==="合格") acc.pass+=1;
+        else if(label==="待定") acc.pending+=1;
+        else if(label==="淘汰") acc.reject+=1;
+        return acc;
+      },{pass:0,pending:0,reject:0});
+      return {
+        ...prev,
+        loading:false,
+        info:created.length?`已导入 ${created.length} 份简历：合格 ${summary.pass} 份，待定 ${summary.pending} 份，淘汰 ${summary.reject} 份。`:"",
+        err:failed.length?failed.slice(0,3).join("；"):"",
+        files:prev.files.filter(file=>failedKeys.has(dashboardFileKey(file))),
+        finishedAt:Date.now(),
+      };
+    });
   };
   const startQuestionGeneration=async(candidate,job,learning)=>{
     if(!candidate?.id) return;
@@ -1466,6 +1514,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
   const dirDone=cands.filter(c=>c.directorVerdict?.verdict);
   const hasQuestionTaskRunning=Object.values(questionTasks).some(task=>task?.loading);
   const hasInterviewTaskRunning=Object.values(interviewTasks).some(task=>task?.loading);
+  const hasDashboardUploadRunning=!!dashboardUpload.loading;
   const needsSettingsAttention = cfg.mode === "direct"
     ? !Object.values(cfg.apiKeys||{}).some(Boolean)
     : !String(cfg.proxyUrl||"").trim();
@@ -1502,6 +1551,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
               <span style={{fontSize:15,width:24,height:24,textAlign:"center",display:"inline-flex",alignItems:"center",justifyContent:"center",borderRadius:8,background:view===n.id?`${T.accent}12`:"rgba(255,255,255,0.7)",color:view===n.id?T.accent:T.text3,boxShadow:view===n.id?"none":"inset 0 0 0 1px rgba(148,163,184,0.12)"}}>{n.icon}</span>
               <span style={{flex:1}}>{n.label}</span>
               {n.id==="settings"&&needsSettingsAttention&&<span style={{width:6,height:6,background:"#ef4444",borderRadius:"50%"}}/>}
+              {n.id==="dashboard"&&hasDashboardUploadRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>导入中</span>}
               {n.id==="dashboard"&&upcoming.length>0&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#ef4444",color:"#fff",borderRadius:10}}>{upcoming.length}</span>}
               {n.id==="jobs"&&jobComposer.jdLoading&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>识别中</span>}
               {n.id==="candidates"&&hasInterviewTaskRunning&&<span style={{fontSize:10,fontWeight:700,padding:"1px 6px",background:"#2563eb",color:"#fff",borderRadius:10}}>评估中</span>}
@@ -1541,7 +1591,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       </aside>
 
       <main style={{flex:1,overflow:"auto"}}>
-        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} setCands={setCands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx}/>}
+        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
@@ -1625,7 +1675,7 @@ const CmpScore=({it})=>{
 };
 
 // ─── DASHBOARD ───────────────────────────────────────────────
-function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cfg,recordTokens,dirCtx}) {
+function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordTokens,dirCtx,dashboardUpload,setDashboardUpload,startDashboardResumeImport}) {
   const stats=[
     {label:"简历通过",val:cands.filter(c=>c.status==="screening").length,color:"#2563eb"},
     {label:"观察中",  val:cands.filter(c=>c.status==="watching").length, color:"#d97706"},
@@ -1635,11 +1685,6 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
   ];
   const total=cands.length;
   const rankedCands=[...cands].sort((a,b)=>(b.screening?.overallScore??-1)-(a.screening?.overallScore??-1));
-  const addImportedCandidates=created=>{
-    if(!created?.length) return;
-    setCands(prev=>[...created,...prev]);
-  };
-
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
     {/* 板块1：数据看板 */}
     <SecLabel T={T}>数据看板</SecLabel>
@@ -1755,7 +1800,7 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
 
     {/* 板块4：简历上传 */}
     <SecLabel T={T}>简历上传</SecLabel>
-    <DashboardResumeUploader T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onBatchCreated={addImportedCandidates}/>
+    <DashboardResumeUploader T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} task={dashboardUpload} setTask={setDashboardUpload} onStart={startDashboardResumeImport}/>
 
     {/* 板块5：候选人列表 */}
     <SecLabel T={T}>候选人列表 ({cands.length})</SecLabel>
@@ -1799,14 +1844,12 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,setCands,cf
   </Page>);
 }
 
-function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}) {
-  const [files,setFiles]=useState([]);
+function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,onStart}) {
   const [drag,setDrag]=useState(false);
-  const [loading,setLoading]=useState(false);
-  const [err,setErr]=useState("");
-  const [info,setInfo]=useState("");
-
-  const fileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
+  const files=task?.files||[];
+  const loading=!!task?.loading;
+  const err=task?.err||"";
+  const info=task?.info||"";
   const queueFiles=inputFiles=>{
     const picked=Array.from(inputFiles||[]).filter(Boolean);
     if(!picked.length) return;
@@ -1816,50 +1859,27 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
       if(getFileKind(file)==="unknown") rejected.push(file.name);
       else accepted.push(file);
     });
-    setFiles(prev=>{
-      const existing=new Set(prev.map(fileKey));
-      const next=[...prev];
+    setTask(prev=>{
+      const existing=new Set((prev.files||[]).map(dashboardFileKey));
+      const merged=[...(prev.files||[])];
       accepted.forEach(file=>{
-        const key=fileKey(file);
-        if(!existing.has(key)){existing.add(key);next.push(file);}
+        const key=dashboardFileKey(file);
+        if(!existing.has(key)){existing.add(key);merged.push(file);}
       });
-      return next;
+      return {
+        ...prev,
+        files:merged,
+        info:"",
+        err:rejected.length?`以下文件格式暂不支持：${rejected.join("、")}`:"",
+      };
     });
-    setInfo("");
-    setErr(rejected.length?`以下文件格式暂不支持：${rejected.join("、")}`:"");
   };
 
-  const removeFile=targetKey=>setFiles(prev=>prev.filter(file=>fileKey(file)!==targetKey));
+  const removeFile=targetKey=>setTask(prev=>({...prev,files:(prev.files||[]).filter(file=>dashboardFileKey(file)!==targetKey)}));
 
   const submit=async()=>{
-    if(!files.length){setErr("请先拖入或选择至少一份简历");return;}
-    setLoading(true);setErr("");setInfo("");
-    const created=[];
-    const failed=[];
-    const failedKeys=new Set();
-    for(const file of files){
-      try{
-        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs});
-        created.push(candidate);
-      }catch(error){
-        failed.push(`${file.name}：${error?.message||"识别失败"}`);
-        failedKeys.add(fileKey(file));
-      }
-    }
-    if(created.length){
-      onBatchCreated(created);
-      const summary=created.reduce((acc,candidate)=>{
-        const label=getScoreBand(candidate.screening?.overallScore).label;
-        if(label==="合格") acc.pass+=1;
-        else if(label==="待定") acc.pending+=1;
-        else if(label==="淘汰") acc.reject+=1;
-        return acc;
-      },{pass:0,pending:0,reject:0});
-      setInfo(`已导入 ${created.length} 份简历：合格 ${summary.pass} 份，待定 ${summary.pending} 份，淘汰 ${summary.reject} 份。`);
-    }
-    setFiles(prev=>prev.filter(file=>failedKeys.has(fileKey(file))));
-    if(failed.length) setErr(failed.slice(0,3).join("；"));
-    setLoading(false);
+    if(!files.length){setTask(prev=>({...prev,err:"请先拖入或选择至少一份简历"}));return;}
+    onStart?.();
   };
 
   return(
@@ -1884,7 +1904,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
           {loading
             ?<div>
               <Spin text="正在识别简历并生成首轮评分..." />
-              <div style={{fontSize:12,color:T.text4,marginTop:8}}>会先抽取文字，再按通用标准完成自动规整与首轮初筛</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:8}}>任务已转入后台。你现在切换到其他窗口也不会中断，回来后会自动保留进度和结果。</div>
             </div>
             :<>
               <div style={{fontSize:36,lineHeight:1,marginBottom:12}}>⇪</div>
@@ -1898,7 +1918,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
             {files.length?`已加入 ${files.length} 份待处理简历，可继续拖入补充。`:"还没有加入简历文件。"}
           </div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {files.length>0&&<button onClick={()=>setFiles([])} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
+            {files.length>0&&<button onClick={()=>setTask(prev=>({...prev,files:[],err:"",info:""}))} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
             <button onClick={submit} disabled={loading||!files.length} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
               {loading?"正在批量分析...":"开始识别并导入"}
             </button>
@@ -1907,7 +1927,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,onBatchCreated}
 
         {files.length>0&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
           {files.map(file=>{
-            const key=fileKey(file);
+            const key=dashboardFileKey(file);
             return(<div key={key} style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:12,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
