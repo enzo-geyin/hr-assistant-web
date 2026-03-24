@@ -1797,9 +1797,18 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
       {jobs.length===0?<div style={{gridColumn:"1 / -1"}}><Empty T={T} icon="◈" title="暂无在招岗位" sub="先去岗位管理新建岗位，再开始批量上传简历。"/></div>
       :jobs.map(job=>{
         const jobCands=cands.filter(c=>c.jobId===job.id);
-        const qualified=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="合格").length;
-        const pending=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="待定").length;
-        const rejected=jobCands.filter(c=>getScoreBand(c.screening?.overallScore).label==="淘汰").length;
+        const statusStats=[
+          {key:"screening",label:"简历通过"},
+          {key:"watching",label:"观察中"},
+          {key:"interview",label:"进入面试"},
+          {key:"offer",label:"已录用"},
+          {key:"rejected",label:"未通过"},
+        ].map(item=>({
+          ...item,
+          count:jobCands.filter(c=>c.status===item.key).length,
+          color:STATUS[item.key].color,
+          bg:STATUS[item.key].bg,
+        }));
         return(<div key={job.id} onClick={()=>onJobClick(job.id)} className="hr" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",cursor:"pointer",boxShadow:SOFT_SHADOW,transition:"transform 0.16s ease, box-shadow 0.16s ease"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}>
             <div>
@@ -1808,8 +1817,9 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
             </div>
             <span style={{fontSize:11,fontWeight:700,padding:"4px 8px",background:T.card2,borderRadius:20,color:T.text3,whiteSpace:"nowrap"}}>{jobCands.length} 份简历</span>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-            {[{label:"合格",count:qualified,color:"#059669",bg:"#ecfdf5"},{label:"待定",count:pending,color:"#d97706",bg:"#fffbeb"},{label:"淘汰",count:rejected,color:"#dc2626",bg:"#fef2f2"}].map(item=>(
+          <div style={{fontSize:11,color:T.text4,marginBottom:8}}>以下为当前流程状态统计，和候选人列表口径一致。</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(92px,1fr))",gap:8}}>
+            {statusStats.map(item=>(
               <div key={item.label} style={{padding:"10px 8px",background:item.bg,borderRadius:9,textAlign:"center"}}>
                 <div style={{fontSize:20,fontWeight:900,color:item.color,lineHeight:1}}>{item.count}</div>
                 <div style={{fontSize:11,color:item.color,marginTop:4,fontWeight:700}}>{item.label}</div>
