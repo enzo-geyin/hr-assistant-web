@@ -1193,7 +1193,7 @@ const SOFT_SHADOW="0 10px 30px rgba(15,23,42,0.06)";
 const CARD_RADIUS=16;
 const EMPTY_JOB_FORM=()=>({title:"",department:"",level:"",requirements:"",t0:"",t1:"",salary:""});
 const EMPTY_JOB_COMPOSER=()=>({open:false,form:EMPTY_JOB_FORM(),jdFileName:"",jdLoading:false,jdErr:"",parsedJobs:[],activeParsedJob:0,taskId:null});
-const EMPTY_DASHBOARD_UPLOAD=()=>({files:[],loading:false,err:"",info:"",taskId:null});
+const EMPTY_DASHBOARD_UPLOAD=()=>({files:[],loading:false,err:"",info:"",taskId:null,results:{}});
 const dashboardFileKey=file=>`${file.name}-${file.size}-${file.lastModified}`;
 const normalizeJobLevel = level => cleanListLine(level || "").toLowerCase();
 const isSingleRoundLevel = level => /(专员|组长|主管)/.test(normalizeJobLevel(level)) && !/(经理|总监)/.test(normalizeJobLevel(level));
@@ -1321,8 +1321,19 @@ export default function App() {
     });
     if(selCand===cid) setSelCand(null);
   };
-  const startDashboardResumeImport=async()=>{
-    if(!dashboardUpload.files?.length) return;
+  const startDashboardResumeImport=async(taskSnapshot=dashboardUpload)=>{
+    const files=[...(taskSnapshot?.files||[])];
+    const previousResults=taskSnapshot?.results||{};
+    const pendingFiles=files.filter(file=>previousResults[dashboardFileKey(file)]?.status!=="success");
+    if(!files.length) return;
+    if(!pendingFiles.length){
+      setDashboardUpload(prev=>({
+        ...prev,
+        info:"当前列表里的简历都已经导入完成。如需重新导入，请先清空列表再重新选择文件。",
+        err:"",
+      }));
+      return;
+    }
     const taskId=`dashboard-upload-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
     setDashboardUpload(prev=>({
       ...prev,
@@ -1331,17 +1342,40 @@ export default function App() {
       info:"",
       taskId,
       startedAt:Date.now(),
+      results:files.reduce((acc,file)=>{
+        const key=dashboardFileKey(file);
+        const existing=prev.results?.[key];
+        acc[key]=existing?.status==="success" ? existing : {
+          status:"processing",
+          message:"正在识别并导入...",
+          name:file.name,
+        };
+        return acc;
+      },{...(prev.results||{})}),
     }));
     const created=[];
     const failed=[];
     const failedKeys=new Set();
-    for(const file of dashboardUpload.files){
+    const nextResults={...previousResults};
+    for(const file of pendingFiles){
+      const key=dashboardFileKey(file);
       try{
         const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs});
         created.push(candidate);
+        nextResults[key]={
+          status:"success",
+          message:`已导入：${candidate.name||"未命名候选人"} · ${getScoreBand(candidate.screening?.overallScore).label}`,
+          candidateId:candidate.id,
+          name:file.name,
+        };
       }catch(error){
         failed.push(`${file.name}：${error?.message||"识别失败"}`);
-        failedKeys.add(dashboardFileKey(file));
+        failedKeys.add(key);
+        nextResults[key]={
+          status:"error",
+          message:error?.message||"识别失败",
+          name:file.name,
+        };
       }
     }
     if(created.length){
@@ -1359,9 +1393,10 @@ export default function App() {
       return {
         ...prev,
         loading:false,
-        info:created.length?`已导入 ${created.length} 份简历：合格 ${summary.pass} 份，待定 ${summary.pending} 份，淘汰 ${summary.reject} 份。`:"",
+        info:created.length?`已导入 ${created.length} 份简历：合格 ${summary.pass} 份，待定 ${summary.pending} 份，淘汰 ${summary.reject} 份。文件列表已保留，你切页面回来也能继续查看处理状态。`:"",
         err:failed.length?failed.slice(0,3).join("；"):"",
-        files:prev.files.filter(file=>failedKeys.has(dashboardFileKey(file))),
+        files:prev.files,
+        results:nextResults,
         finishedAt:Date.now(),
       };
     });
@@ -1685,6 +1720,14 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
   ];
   const total=cands.length;
   const rankedCands=[...cands].sort((a,b)=>(b.screening?.overallScore??-1)-(a.screening?.overallScore??-1));
+  const todayInterviewCandidates = cands
+    .filter(c=>{
+      if(!c?.scheduledAt) return false;
+      const date = new Date(c.scheduledAt);
+      if (Number.isNaN(date.getTime())) return false;
+      return date.toISOString().slice(0,10) === todayStr();
+    })
+    .sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
     {/* 板块1：数据看板 */}
     <SecLabel T={T}>数据看板</SecLabel>
@@ -1710,6 +1753,42 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
           return total>0&&v>0?<div key={s} style={{width:`${v/total*100}%`,background:c}}/>:null;
         })}
       </div>
+    </div>
+    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",marginBottom:24,boxShadow:SOFT_SHADOW}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:T.text}}>今日面试安排</div>
+          <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>把今天已排期的候选人直接放在首页，方便你快速进入面试记录。</div>
+        </div>
+        <Chip c="#7c3aed" bg="#f5f3ff" lg>{`${todayInterviewCandidates.length} 场`}</Chip>
+      </div>
+      {todayInterviewCandidates.length===0
+        ? <div style={{padding:"18px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,fontSize:12,color:T.text4}}>今天还没有已排期的面试。</div>
+        : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12}}>
+            {todayInterviewCandidates.map(candidate=>{
+              const candidateJob = getEffectiveCandidateJob(jobs, candidate);
+              return(
+                <button
+                  key={candidate.id}
+                  onClick={()=>onCandClick(candidate.id,candidate.jobId)}
+                  className="hr"
+                  style={{padding:"14px 14px 13px",background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:14,cursor:"pointer",textAlign:"left",boxShadow:"0 10px 24px rgba(124,58,237,0.08)"}}
+                >
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:15,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidate.name||"未命名候选人"}</div>
+                      <div style={{fontSize:11,color:T.text4,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidateJob?.title||candidate.screening?.roleDirection||"未绑定岗位"}</div>
+                    </div>
+                    <Chip c="#7c3aed" bg="#ede9fe">{candidate.interviewRound||"面试"}</Chip>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                    <div style={{fontSize:20,fontWeight:900,color:"#7c3aed"}}>{fmtDate(candidate.scheduledAt)}</div>
+                    <span style={{fontSize:12,fontWeight:700,color:"#7c3aed"}}>进入记录 →</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>}
     </div>
 
     {/* 板块2：在招岗位 */}
@@ -1850,6 +1929,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
   const loading=!!task?.loading;
   const err=task?.err||"";
   const info=task?.info||"";
+  const results=task?.results||{};
   const queueFiles=inputFiles=>{
     const picked=Array.from(inputFiles||[]).filter(Boolean);
     if(!picked.length) return;
@@ -1871,15 +1951,25 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
         files:merged,
         info:"",
         err:rejected.length?`以下文件格式暂不支持：${rejected.join("、")}`:"",
+        results:merged.reduce((acc,file)=>{
+          const key=dashboardFileKey(file);
+          acc[key]=prev.results?.[key]||{status:"queued",message:"等待导入",name:file.name};
+          return acc;
+        },{}),
       };
     });
   };
 
-  const removeFile=targetKey=>setTask(prev=>({...prev,files:(prev.files||[]).filter(file=>dashboardFileKey(file)!==targetKey)}));
+  const removeFile=targetKey=>setTask(prev=>{
+    const nextFiles=(prev.files||[]).filter(file=>dashboardFileKey(file)!==targetKey);
+    const nextResults={...(prev.results||{})};
+    delete nextResults[targetKey];
+    return {...prev,files:nextFiles,results:nextResults};
+  });
 
   const submit=async()=>{
     if(!files.length){setTask(prev=>({...prev,err:"请先拖入或选择至少一份简历"}));return;}
-    onStart?.();
+    onStart?.({files,results});
   };
 
   return(
@@ -1918,7 +2008,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
             {files.length?`已加入 ${files.length} 份待处理简历，可继续拖入补充。`:"还没有加入简历文件。"}
           </div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {files.length>0&&<button onClick={()=>setTask(prev=>({...prev,files:[],err:"",info:""}))} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
+            {files.length>0&&<button onClick={()=>setTask(prev=>({...prev,files:[],err:"",info:"",results:{}}))} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
             <button onClick={submit} disabled={loading||!files.length} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
               {loading?"正在批量分析...":"开始识别并导入"}
             </button>
@@ -1928,12 +2018,24 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
         {files.length>0&&<div style={{marginTop:14,display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
           {files.map(file=>{
             const key=dashboardFileKey(file);
+            const result=results[key]||{status:"queued",message:"等待导入"};
+            const tone=result.status==="success"
+              ? {c:"#166534",bg:"#ecfdf5",label:"已导入"}
+              : result.status==="error"
+              ? {c:"#b91c1c",bg:"#fef2f2",label:"失败"}
+              : result.status==="processing"
+              ? {c:"#7c3aed",bg:"#f5f3ff",label:"处理中"}
+              : {c:T.text3,bg:T.card2,label:"待导入"};
             return(<div key={key} style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:12,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
                 <div style={{fontSize:11,color:T.text4,marginTop:3}}>{(file.size/1024/1024).toFixed(2)} MB</div>
+                <div style={{fontSize:11,color:tone.c,marginTop:5,lineHeight:1.6}}>{result.message}</div>
               </div>
-              <button onClick={e=>{e.stopPropagation();removeFile(key);}} style={{border:"none",background:"transparent",color:T.text4,cursor:"pointer",fontSize:16,lineHeight:1}}>✕</button>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8}}>
+                <span style={{fontSize:10,fontWeight:800,color:tone.c,background:tone.bg,padding:"4px 8px",borderRadius:999}}>{tone.label}</span>
+                <button onClick={e=>{e.stopPropagation();removeFile(key);}} style={{border:"none",background:"transparent",color:T.text4,cursor:"pointer",fontSize:16,lineHeight:1}}>✕</button>
+              </div>
             </div>);
           })}
         </div>}
