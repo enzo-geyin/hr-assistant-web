@@ -2386,11 +2386,27 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
           </div>
         </div>
         <div style={{flex:1,overflow:"auto",padding:20,display:"flex",justifyContent:"center",alignItems:"flex-start",background:"#111827"}}>
-          <img
-            src={currentPreviewSrc}
-            alt={cand.resumeFileName||"简历预览"}
-            style={{display:"block",width:`${Math.round(previewZoom*100)}%`,maxWidth:"none",height:"auto",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",background:"#fff"}}
-          />
+          <div style={{display:"grid",gridTemplateColumns:visualPreview.kind==="pdf"&&previewPages.length>1?"120px minmax(0,1fr)":"minmax(0,1fr)",gap:16,width:"100%",alignItems:"start"}}>
+            {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",flexDirection:"column",gap:10,maxHeight:"100%",overflow:"auto",paddingRight:4}}>
+              {previewPages.map((pageSrc,index)=>(
+                <button
+                  key={`preview-page-${index}`}
+                  onClick={()=>setPreviewPage(index)}
+                  style={{padding:0,border:index===previewPage?"2px solid #60a5fa":"1px solid rgba(255,255,255,0.12)",background:index===previewPage?"rgba(96,165,250,0.14)":"rgba(255,255,255,0.04)",borderRadius:12,cursor:"pointer",overflow:"hidden"}}
+                >
+                  <img src={pageSrc} alt={`第${index+1}页`} style={{display:"block",width:"100%",height:"auto"}} />
+                  <div style={{padding:"6px 8px",fontSize:11,fontWeight:700,color:index===previewPage?"#bfdbfe":"#cbd5e1",textAlign:"center"}}>{`第${index+1}页`}</div>
+                </button>
+              ))}
+            </div>}
+            <div style={{display:"flex",justifyContent:"center",alignItems:"flex-start",overflow:"auto"}}>
+              <img
+                src={currentPreviewSrc}
+                alt={cand.resumeFileName||"简历预览"}
+                style={{display:"block",width:`${Math.round(previewZoom*100)}%`,maxWidth:"none",height:"auto",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",background:"#fff"}}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>}
@@ -2487,6 +2503,18 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
                 onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
                 style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
               />
+              {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",gap:8,marginTop:10,overflowX:"auto",paddingBottom:4}}>
+                {previewPages.map((pageSrc,index)=>(
+                  <button
+                    key={`inline-preview-page-${index}`}
+                    onClick={()=>setPreviewPage(index)}
+                    style={{padding:0,border:index===previewPage?"2px solid #60a5fa":"1px solid #dbe3ef",background:index===previewPage?"#eff6ff":"#fff",borderRadius:10,cursor:"pointer",overflow:"hidden",minWidth:76,flexShrink:0}}
+                  >
+                    <img src={pageSrc} alt={`第${index+1}页`} style={{display:"block",width:74,height:96,objectFit:"cover",background:"#f8fafc"}} />
+                    <div style={{padding:"4px 6px",fontSize:10,fontWeight:700,color:index===previewPage?"#2563eb":T.text4,textAlign:"center"}}>{`第${index+1}页`}</div>
+                  </button>
+                ))}
+              </div>}
             </div>
           : <div>
               <div style={{fontSize:11,color:"#92400e",marginBottom:10,padding:"10px 12px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,lineHeight:1.7}}>
