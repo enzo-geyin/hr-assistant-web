@@ -1104,12 +1104,44 @@ async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx = "", j
   return { normalizedResume, screening, learning };
 }
 
-async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [] }) {
+const normalizeDuplicateField = value => cleanListLine(String(value || "")).toLowerCase().replace(/\s+/g,"");
+const buildResumeSignature = text => normalizeExtractedText(text)
+  .toLowerCase()
+  .replace(/[\s\p{P}\p{S}]+/gu,"")
+  .slice(0,1600);
+
+const findDuplicateResumeCandidate = (cands, { candidateName = "", fileName = "", resumeSignature = "" } = {}) => {
+  const targetName = normalizeDuplicateField(candidateName);
+  const targetFile = normalizeDuplicateField(fileName);
+  const targetSig = resumeSignature || "";
+  return (cands || []).find(candidate => {
+    const existingSig = candidate?.resumeSignature || buildResumeSignature(candidate?.resume || "");
+    if (targetSig && existingSig && existingSig === targetSig) return true;
+    const existingName = normalizeDuplicateField(candidate?.name);
+    const existingFile = normalizeDuplicateField(candidate?.resumeFileName);
+    if (targetName && targetFile && existingName === targetName && existingFile === targetFile) return true;
+    if (targetName && targetSig && existingName === targetName && existingSig && existingSig.slice(0,600) === targetSig.slice(0,600)) return true;
+    return false;
+  }) || null;
+};
+
+async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [] }) {
   const resumePreview = await createResumeVisualPreview(file).catch(() => null);
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
   const candidateName = name.trim() || screening.candidateName || "未命名";
+  const resumeSignature = buildResumeSignature(normalizedResume);
+  const duplicateCandidate = findDuplicateResumeCandidate(existingCandidates, {
+    candidateName,
+    fileName: file.name,
+    resumeSignature,
+  });
+  if (duplicateCandidate) {
+    const duplicateLabel = duplicateCandidate.name || "未命名候选人";
+    const duplicateFile = duplicateCandidate.resumeFileName ? `（${duplicateCandidate.resumeFileName}）` : "";
+    throw new Error(`疑似重复导入：候选人「${duplicateLabel}」${duplicateFile} 已存在。若要更新，请在该候选人详情里重新上传原始简历。`);
+  }
   return {
     candidate: {
       id: Date.now() + Math.floor(Math.random() * 1000000),
@@ -1117,6 +1149,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       name: candidateName,
       status: getCandidateStatusFromScore(screening.overallScore),
       resume: normalizedResume,
+      resumeSignature,
       resumeFileName: file.name,
       resumePreview,
       screening,
@@ -1360,7 +1393,7 @@ export default function App() {
     for(const file of pendingFiles){
       const key=dashboardFileKey(file);
       try{
-        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs});
+        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs,existingCandidates:[...cands,...created]});
         created.push(candidate);
         nextResults[key]={
           status:"success",
@@ -2281,7 +2314,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     setShowImport(false);
   };
   return(<Page T={T} title="候选人" sub="管理所有候选人及评估进度">
-    {showImport&&<ResumeImportModal T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated}/>}
+    {showImport&&<ResumeImportModal T={T} jobs={jobs} cands={cands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated}/>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>在候选人库里直接上传简历，系统会自动识别文字、规整简历，并按所选岗位完成初筛。</div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
@@ -2335,7 +2368,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
   </Page>);
 }
 
-function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
+function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreated}) {
   const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "");
   const [name,setName]=useState("");
   const [resumeFile,setResumeFile]=useState(null);
@@ -2360,7 +2393,7 @@ function ResumeImportModal({T,jobs,cfg,recordTokens,dirCtx,onClose,onCreated}) {
     if(!resumeFile){setErr("请先上传简历文件");return;}
     setErr("");setInfo("");setLoading(true);
     try{
-      const { candidate, screening }=await createCandidateFromResumeFile({cfg,job:selectedJob,file:resumeFile,onTokens:recordTokens,dirCtx,name});
+      const { candidate, screening }=await createCandidateFromResumeFile({cfg,job:selectedJob,file:resumeFile,onTokens:recordTokens,dirCtx,name,existingCandidates:cands});
       setInfo(`已完成识别与初筛：${candidate.name} / ${getScoreBand(screening.overallScore).label}`);
       onCreated(candidate);
     }catch(error){
@@ -2699,7 +2732,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
     if(!normalizedResume) throw new Error("未能从简历文件中提取到有效文字，请换一个更清晰的文件");
     setResume(normalizedResume);
     setResumeFileName(nextResumeFileName);
-    updCand(cand.id,{name:name||cand.name,resume:normalizedResume,resumeFileName:nextResumeFileName});
+    updCand(cand.id,{name:name||cand.name,resume:normalizedResume,resumeSignature:buildResumeSignature(normalizedResume),resumeFileName:nextResumeFileName});
     try{
       const { screening:res }=await runResumeScreening(cfg, job, normalizedResume, recordTokens, dirCtx);
       const candName=res.candidateName||name||cand.name||"";
@@ -2707,6 +2740,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
       updCand(cand.id,{
         name:candName,
         resume:normalizedResume,
+        resumeSignature:buildResumeSignature(normalizedResume),
         resumeFileName:nextResumeFileName,
         screening:res,
         status:getCandidateStatusFromScore(res.overallScore)
