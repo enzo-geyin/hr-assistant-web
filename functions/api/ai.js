@@ -67,15 +67,18 @@ const PROVIDERS = {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     }),
-    body: ({ model, system, user, maxTokens }) => ({
-      model,
-      max_tokens: maxTokens || 1200,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
+    body: ({ model, system, user, maxTokens }) => {
+      const body = {
+        model,
+        max_tokens: maxTokens || 1200,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+      };
+      if (model !== "deepseek-reasoner") body.response_format = { type: "json_object" };
+      return body;
+    },
     usage: data => ({
       input: data.usage?.prompt_tokens || 0,
       output: data.usage?.completion_tokens || 0,
@@ -169,6 +172,22 @@ function parseModelJSON(text) {
   return cleaned;
 }
 
+async function requestUpstreamJSON(prov, apiKey, payload) {
+  const upstream = await fetch(prov.endpoint, {
+    method: "POST",
+    headers: prov.headers(apiKey),
+    body: JSON.stringify(prov.body(payload)),
+  });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) {
+    throw new Error(data.error?.message || data.message || `上游请求失败 ${upstream.status}`);
+  }
+  return {
+    parsed: parseModelJSON(prov.text(data)),
+    usage: prov.usage(data),
+  };
+}
+
 async function handleRequest(request, env) {
   if (request.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
 
@@ -194,30 +213,36 @@ async function handleRequest(request, env) {
   }
 
   const apiKey = env[prov.envKey];
-  if (!apiKey) return json({ error: `环境变量 ${prov.envKey} 未设置` }, 500);
+  if (!apiKey) {
+    return json({
+      error: `当前选中的 ${prov.name} 尚未在服务端配置。请到设置页切换到已配置的模型，或在 Cloudflare 环境变量里补上 ${prov.envKey}。`,
+    }, 500);
+  }
 
-  let upstream;
   try {
-    upstream = await fetch(prov.endpoint, {
-      method: "POST",
-      headers: prov.headers(apiKey),
-      body: JSON.stringify(prov.body({ model, system, user, file, maxTokens: Math.max(600, Math.min(Number(maxTokens) || 1200, 3200)) })),
-    });
+    const normalizedMaxTokens = Math.max(600, Math.min(Number(maxTokens) || 1200, 3200));
+    const firstPass = await requestUpstreamJSON(prov, apiKey, { model, system, user, file, maxTokens: normalizedMaxTokens });
+    let parsed = firstPass.parsed;
+    let usage = { ...firstPass.usage, provider };
+    if (provider === "deepseek" && model === "deepseek-reasoner" && (!parsed || typeof parsed !== "object")) {
+      const fallback = await requestUpstreamJSON(prov, apiKey, {
+        model: "deepseek-chat",
+        system: `${system}\n\n补充要求：你现在用于结构化输出环节，必须返回稳定 JSON，不要输出思考过程、解释或代码块。`,
+        user,
+        file,
+        maxTokens: normalizedMaxTokens,
+      });
+      parsed = fallback.parsed;
+      usage = {
+        provider,
+        input: (usage.input || 0) + (fallback.usage.input || 0),
+        output: (usage.output || 0) + (fallback.usage.output || 0),
+      };
+    }
+    return json({ data: parsed, usage });
   } catch (error) {
     return json({ error: error?.message || "构建上游请求失败" }, 400);
   }
-  const data = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) {
-    return json(
-      { error: data.error?.message || data.message || `上游请求失败 ${upstream.status}` },
-      upstream.status
-    );
-  }
-
-  return json({
-    data: parseModelJSON(prov.text(data)),
-    usage: { ...prov.usage(data), provider },
-  });
 }
 
 export async function onRequest(context) {
