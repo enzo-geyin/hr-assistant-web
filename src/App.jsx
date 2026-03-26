@@ -804,6 +804,47 @@ const getInterviewRulesText = job => {
   return custom || INTERVIEW_RULES_PROMPT;
 };
 
+const QUESTION_STEP_TEMPLATES = [
+  { step: 1, stepName: "开场破冰" },
+  { step: 2, stepName: "自我介绍" },
+  { step: 3, stepName: "离职动机" },
+  { step: 4, stepName: "经历深挖" },
+  { step: 5, stepName: "经历深挖" },
+  { step: 6, stepName: "经历深挖" },
+  { step: 7, stepName: "关键鉴别题" },
+  { step: 8, stepName: "关键鉴别题" },
+  { step: 9, stepName: "关键鉴别题" },
+  { step: 10, stepName: "反问" },
+];
+
+const extractResumeInterviewAnchors = (resumeText, limit = 8) => {
+  const lines = normalizeLooseListText(resumeText)
+    .split(/\n+/)
+    .map(cleanListLine)
+    .filter(Boolean);
+  const prioritized = lines.filter(line => /(项目|活动|策划|投放|素材|脚本|拍摄|剪辑|店铺|gmv|roi|ctr|cvr|直播|选品|达人|复盘|增长|转化|活动方案|运营)/i.test(line));
+  const selected = dedupeLines([...(prioritized.length ? prioritized : lines)]).slice(0, limit);
+  return selected;
+};
+
+const normalizeGeneratedQuestions = questions => {
+  const fallbackByStep = new Map(QUESTION_STEP_TEMPLATES.map(item => [item.step, item.stepName]));
+  return (questions || [])
+    .map((item, index) => {
+      const parsedStep = Number(item?.step);
+      const safeStep = Number.isFinite(parsedStep) && parsedStep >= 1 && parsedStep <= 10
+        ? Math.round(parsedStep)
+        : Math.min(index + 1, 10);
+      return {
+        ...item,
+        step: safeStep,
+        stepName: cleanListLine(item?.stepName || "") || fallbackByStep.get(safeStep) || `第${safeStep}步`,
+        resumeEvidence: cleanListLine(item?.resumeEvidence || ""),
+      };
+    })
+    .sort((a, b) => Number(a.step) - Number(b.step));
+};
+
 const buildQuestionPrompt = (job, cand, knowledge) => {
   const roleLabel = job?.title || cand?.screening?.roleDirection || "待识别岗位";
   const rubricCtx = formatRubricContext(knowledge);
@@ -812,32 +853,48 @@ const buildQuestionPrompt = (job, cand, knowledge) => {
   const roleBaselineCtx = buildRoleBaselinePrompt(job, cand);
   const candidateBiasCtx = buildCandidateBiasPrompt(cand);
   const interviewRules = getInterviewRulesText(job);
+  const resumeAnchors = extractResumeInterviewAnchors(cand.resume, 8);
   return `岗位：${roleLabel} 要求：${job?.requirements||""}
 简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
 风险：${JSON.stringify(cand.screening?.risks||[])}
+${resumeAnchors.length?`简历关键锚点：\n${resumeAnchors.map((item,index)=>`${index+1}. ${item}`).join("\n")}\n`:""}
 ${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${feedbackGuardrails?`${feedbackGuardrails}\n`:""}${interviewRules}
 ${roleBaselineCtx}
 ${candidateBiasCtx}
 生成10道结构化面试题，返回JSON：
 {"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","principle":"命中的准则名称","resumeEvidence":"对应简历锚点","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
-步骤建议：1.开场破冰 2.自我介绍 3.离职动机 4.经历深挖(4-5题) 5.关键鉴别题(2-3题) 6.反问
+固定步骤顺序：
+1. 开场破冰
+2. 自我介绍
+3. 离职动机
+4. 经历深挖
+5. 经历深挖
+6. 经历深挖
+7. 关键鉴别题
+8. 关键鉴别题
+9. 关键鉴别题
+10. 反问
 要求：
 1. 优先覆盖学习后的重点维度和高风险点，避免重复和空泛问题。
 2. 必须返回合法 JSON，只能有一个顶层对象，顶层键名固定为 questions。
 3. 每道题都要明确写出它命中的准则（principle）和对应的简历锚点（resumeEvidence）。
 4. 所有问题必须指向候选人的真实过往案例，默认使用“请回忆一次你过去...” “你当时具体怎么做的...” 这样的问法。
-5. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
-6. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
-7. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。
-8. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。`;
+5. 题目必须优先命中上面的“简历关键锚点”。如果简历里出现活动策划、项目操盘、素材优化、平台运营、达人对接等经历，就必须围绕这些真实经历追问具体执行方案、判断依据、复盘动作，不能脱离简历另起炉灶。
+6. 不要问泛泛的“如果你来我们公司会怎么做”，也不要把简历里没出现过的经历硬塞给候选人。
+7. step 必须严格使用 1 到 10，每个数字只出现一次，stepName 必须与固定步骤顺序对应，不能把第10步放到前面。
+8. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
+9. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
+10. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。
+11. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。`;
 };
 
 const normalizeQuestionsPayload = payload => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.questions)) return payload.questions;
-  if (Array.isArray(payload?.data?.questions)) return payload.data.questions;
-  if (Array.isArray(payload?.result?.questions)) return payload.result.questions;
-  return [];
+  const raw = Array.isArray(payload) ? payload
+    : Array.isArray(payload?.questions) ? payload.questions
+    : Array.isArray(payload?.data?.questions) ? payload.data.questions
+    : Array.isArray(payload?.result?.questions) ? payload.result.questions
+    : [];
+  return normalizeGeneratedQuestions(raw);
 };
 
 const normalizeInterviewAssessmentPayload = payload => {
@@ -3005,7 +3062,7 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
       <div style={{fontSize:12,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>
         面试后可直接给每道题打标：高价值 / 一般 / 重复 / 无效。系统后续会把这些反馈沉淀进岗位题库学习。
       </div>
-      {[...new Set(qs.map(q=>q.step))].sort().map(step=>{
+      {[...new Set(qs.map(q=>Number(q.step)||0))].sort((a,b)=>a-b).map(step=>{
         const sq=qs.map((q,index)=>({q,index})).filter(item=>item.q.step===step);
         return(<div key={step} style={{marginBottom:18}}>
           <div style={{fontSize:12,fontWeight:800,color:T.text2,padding:"9px 14px",background:"#f8fafc",borderRadius:10,marginBottom:10,border:`1px solid ${T.border}`,borderLeft:`4px solid ${T.accent}`,boxShadow:"0 6px 18px rgba(15,23,42,0.04)"}}>第{step}步 · {sq[0]?.q?.stepName}</div>
