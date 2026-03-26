@@ -40,11 +40,19 @@ const pickCloudCfg = cfg => ({
   proxyUrl: cfg?.proxyUrl || DEFAULT_CFG.proxyUrl,
 });
 
+const sanitizeCandidateForCloud = candidate => {
+  if (!candidate || typeof candidate !== "object") return candidate;
+  return {
+    ...candidate,
+    resumePreview: null,
+  };
+};
+
 const buildCloudSnapshot = (cfg, jobs, cands, usageLogs) => ({
   schemaVersion: CLOUD_SCHEMA_VERSION,
   cfg: pickCloudCfg(cfg),
   jobs: Array.isArray(jobs) ? jobs : [],
-  cands: Array.isArray(cands) ? cands : [],
+  cands: Array.isArray(cands) ? cands.map(sanitizeCandidateForCloud) : [],
   usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
 });
 
