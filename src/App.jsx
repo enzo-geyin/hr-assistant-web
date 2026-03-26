@@ -3684,6 +3684,17 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   const usingProxy=cfg.mode!=="direct";
   const cloudTone=cloud?.phase==="ready"?{c:"#059669",bg:"#ecfdf5"}:cloud?.phase==="syncing"||cloud?.phase==="loading"?{c:"#2563eb",bg:"#eff6ff"}:{c:"#dc2626",bg:"#fef2f2"};
   const cloudLabel=cloud?.phase==="ready"?"已连接 D1":cloud?.phase==="syncing"?"同步中":cloud?.phase==="loading"?"连接中":"云端异常";
+  const providerStatusMap=Object.fromEntries((modelStatus.providers||[]).map(item=>[item.id,item]));
+  const connectedProviders=(modelStatus.providers||[]).filter(item=>item.configured);
+  const firstConnectedProvider=connectedProviders[0] || null;
+  const providerEntries=Object.entries(PROVIDERS).sort(([a],[b])=>{
+    const aConnected=!!providerStatusMap[a]?.configured;
+    const bConnected=!!providerStatusMap[b]?.configured;
+    if(aConnected!==bConnected) return aConnected?-1:1;
+    if(cfg.provider===a && cfg.provider!==b) return -1;
+    if(cfg.provider===b && cfg.provider!==a) return 1;
+    return 0;
+  });
 
   useEffect(()=>{
     let cancelled=false;
@@ -3711,6 +3722,23 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
     loadStatus();
     return()=>{cancelled=true;};
   },[cfg.proxyToken]);
+
+  useEffect(()=>{
+    if(!usingProxy) return;
+    if(modelStatus.loading || modelStatus.error) return;
+    if(!connectedProviders.length) return;
+    const currentProviderStatus=providerStatusMap[cfg.provider];
+    const currentProviderConnected=!!currentProviderStatus?.configured;
+    const fallbackProvider=firstConnectedProvider;
+    const currentProviderModels=PROVIDERS[cfg.provider]?.models || [];
+    const currentModelValid=currentProviderModels.some(item=>item.id===cfg.model);
+    if(currentProviderConnected && currentModelValid) return;
+    const targetProviderId=currentProviderConnected ? cfg.provider : fallbackProvider?.id;
+    const targetModel=PROVIDERS[targetProviderId]?.models?.[0]?.id;
+    if(!targetProviderId || !targetModel) return;
+    if(cfg.provider===targetProviderId && cfg.model===targetModel) return;
+    setCfg(prev=>normalizeCfg({...prev,provider:targetProviderId,model:targetModel}));
+  },[usingProxy,modelStatus.loading,modelStatus.error,connectedProviders.length,cfg.provider,cfg.model,firstConnectedProvider?.id,setCfg]);
 
   const accuracy=dirDone.map(c=>{
     const aiRec=c.screening?.recommendation||"";
@@ -3805,7 +3833,7 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
         {modelStatus.error
           ?<div style={{fontSize:12,color:"#b91c1c",padding:"10px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,lineHeight:1.7}}>{modelStatus.error}</div>
           :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
-            {Object.entries(PROVIDERS).map(([pid,prov])=>{
+            {providerEntries.map(([pid,prov])=>{
               const statusItem=modelStatus.providers.find(item=>item.id===pid);
               const connected=!!statusItem?.configured;
               const tone=connected?{c:"#059669",bg:"#ecfdf5",dot:"#10b981"}:{c:"#dc2626",bg:"#fef2f2",dot:"#ef4444"};
@@ -3830,14 +3858,21 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
             :"当前为浏览器直连模式，后台模型状态仅供参考；真正调用仍取决于你在前端保存的 API Key。"}
         </div>
       </div>
+      {usingProxy&&firstConnectedProvider&&<div style={{fontSize:12,color:T.text3,margin:"-4px 0 14px",lineHeight:1.7}}>
+        代理模式下会默认选择已连接模型，当前优先供应商为 <span style={{fontWeight:800,color:T.text}}>{PROVIDERS[firstConnectedProvider.id]?.name||firstConnectedProvider.id}</span>。
+      </div>}
       <div style={{display:"grid",gap:12,marginBottom:24}}>
-        {Object.entries(PROVIDERS).map(([pid,prov])=>{
+        {providerEntries.map(([pid,prov])=>{
           const isActive=cfg.provider===pid;
+          const providerState=providerStatusMap[pid];
+          const isConnected=!!providerState?.configured;
+          const selectionDisabled=usingProxy && !isConnected;
           return(<div key={pid} style={{background:T.surface,border:`2px solid ${isActive?prov.color:T.border}`,borderRadius:12,padding:"16px 18px",transition:"border 0.15s"}}>
             <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
               <div style={{width:32,height:32,borderRadius:7,background:prov.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,flexShrink:0}}>{prov.logo}</div>
               <div style={{flex:1}}><div style={{fontSize:14,fontWeight:800,color:T.text}}>{prov.name}</div><div style={{fontSize:11,color:T.text4}}>{prov.models.length} 个可用模型</div></div>
               {isActive&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:`${prov.color}18`,color:prov.color,borderRadius:20}}>当前使用</span>}
+              {usingProxy&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:isConnected?"#ecfdf5":"#fef2f2",color:isConnected?"#059669":"#dc2626",borderRadius:20}}>{isConnected?"已连接":"未连接"}</span>}
             </div>
             {!usingProxy
               ?<div style={{marginBottom:11}}>
@@ -3848,19 +3883,20 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
                 </div>
               </div>
               :<div style={{marginBottom:11,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:12,color:T.text3,lineHeight:1.6}}>
-                代理模式下，此供应商的 API Key 由服务端环境变量提供，前端不再保存密钥。
+                {providerState?.message || "代理模式下，此供应商的 API Key 由服务端环境变量提供，前端不再保存密钥。"}
               </div>}
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>
               {prov.models.map(m=>{
                 const isSel=isActive&&cfg.model===m.id;
-                return(<div key={m.id} onClick={()=>setCfg(p=>({...p,provider:pid,model:m.id}))}
-                  style={{padding:"8px 10px",border:`1.5px solid ${isSel?prov.color:T.border}`,borderRadius:8,cursor:"pointer",background:isSel?`${prov.color}10`:T.card2,transition:"all 0.1s"}}>
+                return(<div key={m.id} onClick={()=>{if(selectionDisabled) return;setCfg(p=>({...p,provider:pid,model:m.id}));}}
+                  style={{padding:"8px 10px",border:`1.5px solid ${isSel?prov.color:T.border}`,borderRadius:8,cursor:selectionDisabled?"not-allowed":"pointer",background:isSel?`${prov.color}10`:T.card2,transition:"all 0.1s",opacity:selectionDisabled?0.45:1}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:700,color:T.text}}>{m.name}</span>{isSel&&<span style={{color:prov.color,fontSize:11}}>✓</span>}</div>
                   <div style={{fontSize:11,color:T.text3}}>{m.note}</div>
                   {prov.pricing?.[m.id]&&<div style={{fontSize:10,color:T.text4,marginTop:2}}>${prov.pricing[m.id].in}/${prov.pricing[m.id].out}/M</div>}
                 </div>);
               })}
             </div>
+            {usingProxy&&selectionDisabled&&<div style={{fontSize:11,color:"#dc2626",marginTop:8,lineHeight:1.7}}>当前后台还没连通这个供应商，代理模式下默认不会切到它。请先配置对应环境变量，再点上方“重新检测”。</div>}
           </div>);
         })}
       </div>
