@@ -327,6 +327,8 @@ const buildReadableResumePreview = text => normalizeExtractedText(String(text ||
   .replace(/\n{3,}/g, "\n\n")
   .trim());
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 const normalizeLooseListText = text => normalizeExtractedText(String(text || "")
   .replace(/([0-9]{1,2}\s*[\.、\)])\s*/g, "\n$1 ")
   .replace(/[•·●▪◦▸►]/g, "\n")
@@ -1157,7 +1159,12 @@ const fileToDataUrl = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
-const createResumeVisualPreview = async file => {
+const createResumeVisualPreview = async (file, options = {}) => {
+  const {
+    maxPages = Number.POSITIVE_INFINITY,
+    scale = 1.35,
+    imageQuality = 0.92,
+  } = options || {};
   const kind = getFileKind(file);
   if (kind === "image") {
     const src = await fileToDataUrl(file);
@@ -1167,6 +1174,7 @@ const createResumeVisualPreview = async file => {
       pages: [src],
       name: file.name,
       pageCount: 1,
+      previewMode: "full",
     };
   }
   if (kind === "pdf") {
@@ -1174,10 +1182,11 @@ const createResumeVisualPreview = async file => {
     const data = new Uint8Array(await file.arrayBuffer());
     const pdf = await pdfjsLib.getDocument({ data }).promise;
     const pages = [];
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const renderCount = Math.min(pdf.numPages, Math.max(1, Number.isFinite(maxPages) ? maxPages : pdf.numPages));
+    for (let pageNumber = 1; pageNumber <= renderCount; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
-      const canvas = await renderPdfPageToCanvas(page, 1.35);
-      pages.push(canvas.toDataURL("image/jpeg", 0.92));
+      const canvas = await renderPdfPageToCanvas(page, scale);
+      pages.push(canvas.toDataURL("image/jpeg", imageQuality));
     }
     return {
       kind: "pdf",
@@ -1185,6 +1194,7 @@ const createResumeVisualPreview = async file => {
       pages,
       name: file.name,
       pageCount: pdf.numPages,
+      previewMode: renderCount >= pdf.numPages ? "full" : "light",
     };
   }
   return null;
@@ -1214,8 +1224,30 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
     if(!url) throw new Error("请先在「设置」中填写代理服务地址");
     const headers={"Content-Type":"application/json"};
     if(proxyToken.trim()) headers.Authorization=`Bearer ${proxyToken.trim()}`;
-    const res=await fetch(url,{method:"POST",headers,body:JSON.stringify({provider,model,system:fullSys,user,maxTokens})});
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error||e.message||`Proxy Error ${res.status}`);}
+    let res;
+    let lastError=null;
+    for(let attempt=0;attempt<3;attempt+=1){
+      try{
+        res=await fetch(url,{method:"POST",headers,body:JSON.stringify({provider,model,system:fullSys,user,maxTokens})});
+        if(res.ok) break;
+        const e=await res.json().catch(()=>({}));
+        const message=e.error||e.message||`Proxy Error ${res.status}`;
+        if(res.status>=500 && attempt<2){
+          lastError=new Error(message);
+          await sleep(350*(attempt+1));
+          continue;
+        }
+        throw new Error(message);
+      }catch(error){
+        if(attempt<2){
+          lastError=error;
+          await sleep(350*(attempt+1));
+          continue;
+        }
+        throw error||lastError;
+      }
+    }
+    if(!res?.ok) throw lastError||new Error("代理服务暂时不可用");
     const d=await res.json();
     inputT=d.usage?.input||0; outputT=d.usage?.output||0;
     if(onTokens) onTokens(inputT,outputT,provider);
@@ -1318,8 +1350,15 @@ const findDuplicateResumeCandidate = (cands, { candidateName = "", fileName = ""
   }) || null;
 };
 
-async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [] }) {
-  const resumePreview = await createResumeVisualPreview(file).catch(() => null);
+async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [], previewMode = "full" }) {
+  const resumePreview = previewMode
+    ? await createResumeVisualPreview(
+        file,
+        previewMode === "light"
+          ? { maxPages: 1, scale: 0.95, imageQuality: 0.82 }
+          : {}
+      ).catch(() => null)
+    : null;
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
@@ -1345,6 +1384,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       resumeSignature,
       resumeFileName: file.name,
       resumePreview,
+      resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
       screening,
       questions: null,
       interviews: [],
@@ -1514,6 +1554,16 @@ export default function App() {
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
   const updCand=(id,patch)=>setCands(p=>p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c));
+  const startCandidatePreviewUpgrade=async(candidateId,file)=>{
+    if(!candidateId || !file || getFileKind(file)!=="pdf") return;
+    updCand(candidateId,{resumePreviewStatus:"generating"});
+    try{
+      const fullPreview=await createResumeVisualPreview(file);
+      updCand(candidateId,{resumePreview:fullPreview,resumePreviewStatus:fullPreview?.src?"ready":"none"});
+    }catch{
+      updCand(candidateId,{resumePreviewStatus:"failed"});
+    }
+  };
   const recordTokens=(inp,out,prov)=>{
     const d=todayStr();
     setUsageLogs(p=>{
@@ -1589,32 +1639,62 @@ export default function App() {
     }));
     const created=[];
     const failed=[];
-    const failedKeys=new Set();
     const nextResults={...previousResults};
-    for(const file of pendingFiles){
+    const concurrency=Math.min(3,pendingFiles.length);
+    let cursor=0;
+    const syncProgress=(partialInfo="")=>{
+      setDashboardUpload(prev=>{
+        if(prev.taskId!==taskId) return prev;
+        return {
+          ...prev,
+          results:{...nextResults},
+          info:partialInfo||prev.info,
+        };
+      });
+    };
+    const processFile=async(file)=>{
       const key=dashboardFileKey(file);
       try{
-        const { candidate }=await createCandidateFromResumeFile({cfg,job:null,file,onTokens:recordTokens,dirCtx,jobs,existingCandidates:[...cands,...created]});
+        const { candidate }=await createCandidateFromResumeFile({
+          cfg,
+          job:null,
+          file,
+          onTokens:recordTokens,
+          dirCtx,
+          jobs,
+          existingCandidates:[...cands,...created],
+          previewMode:"light",
+        });
         created.push(candidate);
+        setCands(prev=>[candidate,...prev]);
         nextResults[key]={
           status:"success",
-          message:`已导入：${candidate.name||"未命名候选人"} · ${getScoreBand(candidate.screening?.overallScore).label}`,
+          message:`已导入：${candidate.name||"未命名候选人"} · ${getScoreBand(candidate.screening?.overallScore).label}${candidate.resumePreview?.previewMode==="light"?" · 正在后台补全完整预览":""}`,
           candidateId:candidate.id,
           name:file.name,
         };
+        if(candidate.resumePreview?.previewMode==="light"){
+          startCandidatePreviewUpgrade(candidate.id,file);
+        }
       }catch(error){
         failed.push(`${file.name}：${error?.message||"识别失败"}`);
-        failedKeys.add(key);
         nextResults[key]={
           status:"error",
           message:error?.message||"识别失败",
           name:file.name,
         };
       }
-    }
-    if(created.length){
-      setCands(prev=>[...created,...prev]);
-    }
+      const doneCount=Object.values(nextResults).filter(item=>item?.status==="success"||item?.status==="error").length;
+      syncProgress(`正在批量导入：已完成 ${doneCount}/${files.length} 份。批量导入已自动跳过重型版式预览，速度会更快。`);
+    };
+    const workers=Array.from({length:concurrency},async()=>{
+      while(cursor<pendingFiles.length){
+        const file=pendingFiles[cursor];
+        cursor+=1;
+        await processFile(file);
+      }
+    });
+    await Promise.all(workers);
     setDashboardUpload(prev=>{
       if(prev.taskId!==taskId) return prev;
       const summary=created.reduce((acc,candidate)=>{
@@ -2797,6 +2877,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
         {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#f5f3ff"}}>📅 {fmtDate(cand.scheduledAt)}</span>}
         {!cand.jobId&&job&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>当前按识别岗位出题</span>}
+        {cand.resumePreviewStatus==="generating"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8"}}>完整预览后台补全中</span>}
+        {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"minmax(250px,1.2fr) minmax(220px,1fr) auto",gap:12,marginTop:16,alignItems:"end"}}>
@@ -2826,6 +2908,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
             {!visualPreview?.src&&cand.resumeFileName?" · 当前未保存原始版式预览":""
             }
+            {visualPreview?.previewMode==="light"?" · 当前先展示批量导入轻量预览":""}
+            {cand.resumePreviewStatus==="generating"?" · 完整预览正在后台生成，稍后会自动补齐":""}
           </div>
         </div>
         <button
@@ -2869,6 +2953,9 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
                 onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
                 style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
               />
+              {visualPreview.kind==="pdf"&&visualPreview.previewMode==="light"&&visualPreview.pageCount>previewPages.length&&<div style={{fontSize:11,color:T.text4,marginTop:8,lineHeight:1.7}}>
+                这是批量导入时保存的轻量预览，为了加速导入仅展示第一页。若需要完整页数预览，可在候选人详情里重新上传该简历。
+              </div>}
               {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",gap:8,marginTop:10,overflowX:"auto",paddingBottom:4}}>
                 {previewPages.map((pageSrc,index)=>(
                   <button
