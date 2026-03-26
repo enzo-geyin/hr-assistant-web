@@ -8,6 +8,7 @@ const ENV_PROXY_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_P
 const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_TOKEN?import.meta.env.VITE_HR_PROXY_TOKEN:"";
 const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
 const ENV_KNOWLEDGE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_KNOWLEDGE_URL?import.meta.env.VITE_HR_KNOWLEDGE_URL:"/api/knowledge";
+const ENV_MODEL_STATUS_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_MODEL_STATUS_URL?import.meta.env.VITE_HR_MODEL_STATUS_URL:"/api/model-status";
 const CLOUD_SCHEMA_VERSION = 1;
 const KNOWLEDGE_MIN_SAMPLES = 2;
 
@@ -184,6 +185,13 @@ async function pushCloudState(token = "", state) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `云端保存失败 ${res.status}`);
+  return data;
+}
+
+async function fetchModelStatus(token = "") {
+  const res = await fetch(ENV_MODEL_STATUS_URL, { headers: buildCloudHeaders(token) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `模型状态读取失败 ${res.status}`);
   return data;
 }
 
@@ -3671,10 +3679,38 @@ function ResultTab({T,cand}) {
 function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud}) {
   const [keys,setKeys]=useState(cfg.apiKeys||{});
   const [saved,setSaved]=useState("");
+  const [modelStatus,setModelStatus]=useState({loading:true,error:"",checkedAt:"",providers:[]});
   const saveKey=pid=>{setCfg(p=>({...p,apiKeys:{...p.apiKeys,[pid]:keys[pid]}}));setSaved(pid);setTimeout(()=>setSaved(""),1500);};
   const usingProxy=cfg.mode!=="direct";
   const cloudTone=cloud?.phase==="ready"?{c:"#059669",bg:"#ecfdf5"}:cloud?.phase==="syncing"||cloud?.phase==="loading"?{c:"#2563eb",bg:"#eff6ff"}:{c:"#dc2626",bg:"#fef2f2"};
   const cloudLabel=cloud?.phase==="ready"?"已连接 D1":cloud?.phase==="syncing"?"同步中":cloud?.phase==="loading"?"连接中":"云端异常";
+
+  useEffect(()=>{
+    let cancelled=false;
+    const loadStatus=async()=>{
+      setModelStatus(prev=>({...prev,loading:true,error:""}));
+      try{
+        const data=await fetchModelStatus(cfg.proxyToken||"");
+        if(cancelled) return;
+        setModelStatus({
+          loading:false,
+          error:"",
+          checkedAt:data?.checkedAt||"",
+          providers:Array.isArray(data?.providers)?data.providers:[],
+        });
+      }catch(error){
+        if(cancelled) return;
+        setModelStatus({
+          loading:false,
+          error:error?.message||"模型状态读取失败",
+          checkedAt:"",
+          providers:[],
+        });
+      }
+    };
+    loadStatus();
+    return()=>{cancelled=true;};
+  },[cfg.proxyToken]);
 
   const accuracy=dirDone.map(c=>{
     const aiRec=c.screening?.recommendation||"";
@@ -3732,6 +3768,68 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
       </div>
 
       <SecLabel T={T}>AI 模型配置</SecLabel>
+      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:18}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:14,fontWeight:800,color:T.text}}>后台模型状态</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:4}}>设置页每次打开都会自动检测后台环境变量，告诉你哪些模型已连通、哪些还没配置。</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {modelStatus.checkedAt&&<span style={{fontSize:11,color:T.text4}}>最近检查：{fmtCloudTime(modelStatus.checkedAt)}</span>}
+            <button
+              onClick={async()=>{
+                setModelStatus(prev=>({...prev,loading:true,error:""}));
+                try{
+                  const data=await fetchModelStatus(cfg.proxyToken||"");
+                  setModelStatus({
+                    loading:false,
+                    error:"",
+                    checkedAt:data?.checkedAt||"",
+                    providers:Array.isArray(data?.providers)?data.providers:[],
+                  });
+                }catch(error){
+                  setModelStatus({
+                    loading:false,
+                    error:error?.message||"模型状态读取失败",
+                    checkedAt:"",
+                    providers:[],
+                  });
+                }
+              }}
+              style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}
+            >
+              {modelStatus.loading?"检测中...":"重新检测"}
+            </button>
+          </div>
+        </div>
+        {modelStatus.error
+          ?<div style={{fontSize:12,color:"#b91c1c",padding:"10px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,lineHeight:1.7}}>{modelStatus.error}</div>
+          :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
+            {Object.entries(PROVIDERS).map(([pid,prov])=>{
+              const statusItem=modelStatus.providers.find(item=>item.id===pid);
+              const connected=!!statusItem?.configured;
+              const tone=connected?{c:"#059669",bg:"#ecfdf5",dot:"#10b981"}:{c:"#dc2626",bg:"#fef2f2",dot:"#ef4444"};
+              return(
+                <div key={pid} style={{padding:"14px 14px 12px",background:connected?tone.bg:T.card2,border:`1px solid ${connected?"#bbf7d0":T.border}`,borderRadius:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                      <div style={{width:10,height:10,borderRadius:999,background:tone.dot,flexShrink:0}}/>
+                      <div style={{fontSize:13,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prov.name}</div>
+                    </div>
+                    <Chip c={tone.c} bg={connected?tone.bg:"#fef2f2"}>{connected?"已连接":"未连接"}</Chip>
+                  </div>
+                  <div style={{fontSize:11,color:T.text3,lineHeight:1.7}}>{statusItem?.message || "尚未检测到该模型状态"}</div>
+                  <div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>{statusItem?.tip || "配置好服务端环境变量后即可在代理模式下使用"}</div>
+                </div>
+              );
+            })}
+          </div>}
+        <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>
+          {usingProxy
+            ?"当前为后端代理模式，以上状态来自服务端环境变量探测。"
+            :"当前为浏览器直连模式，后台模型状态仅供参考；真正调用仍取决于你在前端保存的 API Key。"}
+        </div>
+      </div>
       <div style={{display:"grid",gap:12,marginBottom:24}}>
         {Object.entries(PROVIDERS).map(([pid,prov])=>{
           const isActive=cfg.provider===pid;
