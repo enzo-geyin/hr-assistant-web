@@ -1350,7 +1350,7 @@ const findDuplicateResumeCandidate = (cands, { candidateName = "", fileName = ""
   }) || null;
 };
 
-async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [], previewMode = "full" }) {
+async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [], previewMode = "full", importMeta = {} }) {
   const resumePreview = previewMode
     ? await createResumeVisualPreview(
         file,
@@ -1391,6 +1391,9 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       scheduledAt: null,
       interviewRound: null,
       directorVerdict: null,
+      importedAt: importMeta.importedAt || new Date().toISOString(),
+      importBatchId: importMeta.importBatchId || "",
+      importSeq: Number.isFinite(importMeta.importSeq) ? importMeta.importSeq : null,
       updatedAt: new Date().toISOString(),
     },
     screening,
@@ -1619,6 +1622,8 @@ export default function App() {
       return;
     }
     const taskId=`dashboard-upload-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const importBatchId=`batch-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    const importBatchTime=new Date().toISOString();
     setDashboardUpload(prev=>({
       ...prev,
       loading:true,
@@ -1654,6 +1659,7 @@ export default function App() {
     };
     const processFile=async(file)=>{
       const key=dashboardFileKey(file);
+      const importSeq=files.findIndex(item=>dashboardFileKey(item)===key);
       try{
         const { candidate }=await createCandidateFromResumeFile({
           cfg,
@@ -1664,6 +1670,11 @@ export default function App() {
           jobs,
           existingCandidates:[...cands,...created],
           previewMode:"light",
+          importMeta:{
+            importBatchId,
+            importSeq,
+            importedAt: importBatchTime,
+          },
         });
         created.push(candidate);
         setCands(prev=>[candidate,...prev]);
@@ -2579,6 +2590,19 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
 function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate}) {
+  const sortedCands=[...cands].sort((a,b)=>{
+    const batchA=a.importBatchId||"";
+    const batchB=b.importBatchId||"";
+    const timeA=new Date(a.importedAt || a.createdAt || a.updatedAt || 0).getTime() || 0;
+    const timeB=new Date(b.importedAt || b.createdAt || b.updatedAt || 0).getTime() || 0;
+    if(batchA && batchA===batchB){
+      const seqA=Number.isFinite(a.importSeq)?a.importSeq:Number.MAX_SAFE_INTEGER;
+      const seqB=Number.isFinite(b.importSeq)?b.importSeq:Number.MAX_SAFE_INTEGER;
+      if(seqA!==seqB) return seqA-seqB;
+    }
+    if(timeA!==timeB) return timeB-timeA;
+    return Number(b.id||0)-Number(a.id||0);
+  });
   const cand=cands.find(c=>c.id===selCand);
   const job=getEffectiveCandidateJob(jobs,cand);
   const [showImport,setShowImport]=useState(false);
@@ -2607,8 +2631,8 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text}}>全部候选人 ({cands.length})</div>
         <div style={{overflowY:"auto",maxHeight:"calc(100vh - 160px)"}}>
-          {cands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>暂无候选人</div>
-          :cands.map(c=>{
+          {sortedCands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>暂无候选人</div>
+          :sortedCands.map(c=>{
             const boundJob=jobs.find(j=>j.id===c.jobId);
             const effectiveJob=getEffectiveCandidateJob(jobs,c);
             const isCmp=compared.includes(c.id);
