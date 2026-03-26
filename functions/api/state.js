@@ -56,6 +56,131 @@ function normalizeStatePayload(raw) {
   };
 }
 
+function normalizeDuplicateField(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizeExtractedText(text) {
+  return String(text || "")
+    .replace(/\u0000/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildResumeSignature(text) {
+  return normalizeExtractedText(text)
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "")
+    .slice(0, 1600);
+}
+
+function entityTime(entity) {
+  const value = entity?.updatedAt || entity?.createdAt || "";
+  const ts = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function pickRicherValue(preferred, fallback) {
+  if (preferred == null || preferred === "") return fallback;
+  if (Array.isArray(preferred) && !preferred.length) return fallback;
+  if (typeof preferred === "object" && !Array.isArray(preferred) && !Object.keys(preferred).length) return fallback;
+  return preferred;
+}
+
+function sanitizeCandidateForCloud(candidate) {
+  if (!candidate || typeof candidate !== "object") return candidate;
+  return { ...candidate, resumePreview: null };
+}
+
+function mergeCandidateRecord(left, right) {
+  const newer = entityTime(left) > entityTime(right) ? left : right;
+  const older = newer === left ? right : left;
+  return sanitizeCandidateForCloud({
+    ...older,
+    ...newer,
+    name: pickRicherValue(newer?.name, older?.name),
+    jobId: newer?.jobId ?? older?.jobId ?? null,
+    status: pickRicherValue(newer?.status, older?.status) || "pending",
+    resume: pickRicherValue(newer?.resume, older?.resume),
+    resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
+    resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
+    screening: pickRicherValue(newer?.screening, older?.screening),
+    questions: pickRicherValue(newer?.questions, older?.questions) || null,
+    interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
+    scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
+    interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
+    directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
+    updatedAt: new Date(Math.max(entityTime(left), entityTime(right), Date.now())).toISOString(),
+  });
+}
+
+function mergeJobsById(localJobs = [], remoteJobs = []) {
+  const map = new Map();
+  [...remoteJobs, ...localJobs].forEach(job => {
+    if (!job?.id) return;
+    const existing = map.get(job.id);
+    if (!existing) {
+      map.set(job.id, job);
+      return;
+    }
+    map.set(job.id, entityTime(job) > entityTime(existing) ? { ...existing, ...job } : { ...job, ...existing });
+  });
+  return [...map.values()];
+}
+
+function mergeCandidates(localCands = [], remoteCands = []) {
+  const map = new Map();
+  [...remoteCands, ...localCands].forEach(candidate => {
+    if (!candidate) return;
+    const signature = candidate.resumeSignature || buildResumeSignature(candidate.resume || "");
+    const key = candidate.id
+      ? `id:${candidate.id}`
+      : signature
+        ? `sig:${signature}`
+        : `name:${normalizeDuplicateField(candidate.name)}|file:${normalizeDuplicateField(candidate.resumeFileName)}`;
+    const enriched = sanitizeCandidateForCloud(signature ? { ...candidate, resumeSignature: signature } : candidate);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, enriched);
+      return;
+    }
+    map.set(key, mergeCandidateRecord(existing, enriched));
+  });
+  return [...map.values()].sort((a, b) => entityTime(b) - entityTime(a));
+}
+
+function mergeUsageLogs(localLogs = [], remoteLogs = []) {
+  const map = new Map();
+  [...remoteLogs, ...localLogs].forEach(log => {
+    if (!log?.date || !log?.provider) return;
+    const key = `${log.date}-${log.provider}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, log);
+      return;
+    }
+    map.set(key, {
+      ...existing,
+      ...log,
+      input: Math.max(Number(existing.input) || 0, Number(log.input) || 0),
+      output: Math.max(Number(existing.output) || 0, Number(log.output) || 0),
+      calls: Math.max(Number(existing.calls) || 0, Number(log.calls) || 0),
+    });
+  });
+  return [...map.values()].sort((a, b) => `${a.date}-${a.provider}`.localeCompare(`${b.date}-${b.provider}`));
+}
+
+function mergeStatePayloads(incoming, existing) {
+  return {
+    schemaVersion: Math.max(Number(existing?.schemaVersion) || SCHEMA_VERSION, Number(incoming?.schemaVersion) || SCHEMA_VERSION),
+    cfg: { ...(existing?.cfg || {}), ...(incoming?.cfg || {}) },
+    jobs: mergeJobsById(incoming?.jobs || [], existing?.jobs || []),
+    cands: mergeCandidates(incoming?.cands || [], existing?.cands || []),
+    usageLogs: mergeUsageLogs(incoming?.usageLogs || [], existing?.usageLogs || []),
+  };
+}
+
 async function readState(db) {
   const row = await db.prepare(SELECT_STATE_SQL).bind(STATE_KEY).first();
   if (!row?.payload) return { state: null, updatedAt: "" };
@@ -104,16 +229,18 @@ export async function onRequest(context) {
     const normalized = normalizeStatePayload(body);
     const now = new Date().toISOString();
     try {
+      const existing = await readState(env.DB);
+      const merged = mergeStatePayloads(normalized, normalizeStatePayload(existing?.state || {}));
       await env.DB.prepare(UPSERT_STATE_SQL)
         .bind(
           STATE_KEY,
-          JSON.stringify(normalized),
-          normalized.schemaVersion || SCHEMA_VERSION,
+          JSON.stringify(merged),
+          merged.schemaVersion || SCHEMA_VERSION,
           now,
           now
         )
         .run();
-      return json({ ok: true, updatedAt: now });
+      return json({ ok: true, updatedAt: now, state: merged });
     } catch (error) {
       return json({ error: error?.message || "保存云端状态失败" }, 500);
     }

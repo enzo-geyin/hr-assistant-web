@@ -1206,6 +1206,8 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
   const apiKey = apiKeys[provider]||"";
   const fullSys = dirCtx ? `${system}\n\n${dirCtx}` : system;
   const maxTokens = Math.max(600, Math.min(Number(options?.maxTokens) || 1200, 3200));
+  const allowReasonerFallback = options?.allowReasonerFallback !== false;
+  const shouldFallbackReasoner = provider==="deepseek" && model==="deepseek-reasoner" && allowReasonerFallback;
   let inputT=0,outputT=0,text="";
   if (mode==="proxy") {
     const url=proxyUrl.trim();
@@ -1219,7 +1221,18 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
     if(onTokens) onTokens(inputT,outputT,provider);
     if(d?.data && typeof d.data==="object") return d.data;
     text=typeof d?.data==="string"?d.data:"";
-    return parseJsonResponse(text);
+    const parsed=parseJsonResponse(text);
+    if(shouldFallbackReasoner && parsed?.error){
+      return callAI(
+        {...cfg,model:"deepseek-chat"},
+        `${system}\n\n补充要求：你现在用于结构化输出环节，必须返回稳定 JSON，不要输出思考过程、解释或代码块。`,
+        user,
+        onTokens,
+        dirCtx,
+        {...options,allowReasonerFallback:false}
+      );
+    }
+    return parsed;
   }
   if (!apiKey) throw new Error(`请先在「设置」中填写 ${prov.name} 的 API Key`);
   if (provider==="claude") {
@@ -1228,13 +1241,24 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
     const d=await res.json(); inputT=d.usage?.input_tokens||0; outputT=d.usage?.output_tokens||0; text=d.content?.[0]?.text||"";
   } else {
     const body={model,max_tokens:maxTokens,messages:[{role:"system",content:fullSys},{role:"user",content:user}]};
-    if(provider==="deepseek") body.response_format={type:"json_object"};
+    if(provider==="deepseek" && model!=="deepseek-reasoner") body.response_format={type:"json_object"};
     const res=await fetch(prov.endpoint,{method:"POST",headers:{"Content-Type":"application/json","Authorization":`Bearer ${apiKey}`},body:JSON.stringify(body)});
     if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.error?.message||`API Error ${res.status}`);}
     const d=await res.json(); inputT=d.usage?.prompt_tokens||0; outputT=d.usage?.completion_tokens||0; text=d.choices?.[0]?.message?.content||"";
   }
   if(onTokens) onTokens(inputT,outputT,provider);
-  return parseJsonResponse(text);
+  const parsed=parseJsonResponse(text);
+  if(shouldFallbackReasoner && parsed?.error){
+    return callAI(
+      {...cfg,model:"deepseek-chat"},
+      `${system}\n\n补充要求：你现在用于结构化输出环节，必须返回稳定 JSON，不要输出思考过程、解释或代码块。`,
+      user,
+      onTokens,
+      dirCtx,
+      {...options,allowReasonerFallback:false}
+    );
+  }
+  return parsed;
 }
 
 async function callAIWithJobFile(cfg, file, onTokens) {
