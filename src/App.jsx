@@ -48,6 +48,102 @@ const buildCloudSnapshot = (cfg, jobs, cands, usageLogs) => ({
   usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
 });
 
+const entityTime = entity => {
+  const value = entity?.updatedAt || entity?.createdAt || "";
+  const ts = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(ts) ? ts : 0;
+};
+
+const pickRicherValue = (preferred, fallback) => {
+  if (preferred == null || preferred === "") return fallback;
+  if (Array.isArray(preferred) && !preferred.length) return fallback;
+  if (typeof preferred === "object" && !Array.isArray(preferred) && !Object.keys(preferred).length) return fallback;
+  return preferred;
+};
+
+const mergeCandidateRecord = (left, right) => {
+  const newer = entityTime(left) > entityTime(right) ? left : right;
+  const older = newer === left ? right : left;
+  return {
+    ...older,
+    ...newer,
+    name: pickRicherValue(newer?.name, older?.name),
+    jobId: newer?.jobId ?? older?.jobId ?? null,
+    status: pickRicherValue(newer?.status, older?.status) || "pending",
+    resume: pickRicherValue(newer?.resume, older?.resume),
+    resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
+    resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
+    resumePreview: pickRicherValue(newer?.resumePreview, older?.resumePreview),
+    screening: pickRicherValue(newer?.screening, older?.screening),
+    questions: pickRicherValue(newer?.questions, older?.questions) || null,
+    interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
+    scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
+    interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
+    directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
+    updatedAt: new Date(Math.max(entityTime(left), entityTime(right), Date.now())).toISOString(),
+  };
+};
+
+const mergeJobsById = (localJobs = [], remoteJobs = []) => {
+  const map = new Map();
+  [...remoteJobs, ...localJobs].forEach(job => {
+    if (!job?.id) return;
+    const existing = map.get(job.id);
+    if (!existing) {
+      map.set(job.id, job);
+      return;
+    }
+    map.set(job.id, entityTime(job) > entityTime(existing) ? { ...existing, ...job } : { ...job, ...existing });
+  });
+  return [...map.values()];
+};
+
+const mergeCandidates = (localCands = [], remoteCands = []) => {
+  const map = new Map();
+  [...remoteCands, ...localCands].forEach(candidate => {
+    if (!candidate) return;
+    const signature = candidate.resumeSignature || buildResumeSignature(candidate.resume || "");
+    const key = candidate.id ? `id:${candidate.id}` : signature ? `sig:${signature}` : `name:${normalizeDuplicateField(candidate.name)}|file:${normalizeDuplicateField(candidate.resumeFileName)}`;
+    const enriched = signature ? { ...candidate, resumeSignature: signature } : candidate;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, enriched);
+      return;
+    }
+    map.set(key, mergeCandidateRecord(existing, enriched));
+  });
+  return [...map.values()].sort((a, b) => entityTime(b) - entityTime(a));
+};
+
+const mergeUsageLogs = (localLogs = [], remoteLogs = []) => {
+  const map = new Map();
+  [...remoteLogs, ...localLogs].forEach(log => {
+    if (!log?.date || !log?.provider) return;
+    const key = `${log.date}-${log.provider}`;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, log);
+      return;
+    }
+    map.set(key, {
+      ...existing,
+      ...log,
+      input: Math.max(Number(existing.input) || 0, Number(log.input) || 0),
+      output: Math.max(Number(existing.output) || 0, Number(log.output) || 0),
+      calls: Math.max(Number(existing.calls) || 0, Number(log.calls) || 0),
+    });
+  });
+  return [...map.values()].sort((a, b) => `${a.date}-${a.provider}`.localeCompare(`${b.date}-${b.provider}`));
+};
+
+const mergeCloudSnapshots = (localState, remoteState) => ({
+  cfg: { ...remoteState.cfg, ...localState.cfg },
+  jobs: mergeJobsById(localState.jobs, remoteState.jobs),
+  cands: mergeCandidates(localState.cands, remoteState.cands),
+  usageLogs: mergeUsageLogs(localState.usageLogs, remoteState.usageLogs),
+  updatedAt: remoteState.updatedAt || localState.updatedAt || "",
+});
+
 const normalizeCloudState = payload => {
   const state = payload && typeof payload === "object" && "state" in payload ? payload.state : payload;
   return {
@@ -1158,6 +1254,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       scheduledAt: null,
       interviewRound: null,
       directorVerdict: null,
+      updatedAt: new Date().toISOString(),
     },
     screening,
     normalizedResume,
@@ -1272,13 +1369,20 @@ export default function App() {
         const payload=await fetchCloudState(cfg.proxyToken||"");
         if(cancelled) return;
         const remote=normalizeCloudState(payload);
+        const local=normalizeCloudState(buildCloudSnapshot(cfg,jobs,cands,usageLogs));
         const hasRemoteData=remote.jobs.length>0||remote.cands.length>0||remote.usageLogs.length>0||Object.keys(remote.cfg).length>0;
         if(hasRemoteData){
-          setJobs(remote.jobs);
-          setCands(remote.cands);
-          setUsageLogs(remote.usageLogs);
-          setCfg(prev=>normalizeCfg({...prev,...remote.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken}));
-          setCloud({phase:"ready",message:"已从云端数据库载入数据",updatedAt:payload.updatedAt||remote.updatedAt||""});
+          const merged=mergeCloudSnapshots(local, remote);
+          setJobs(merged.jobs);
+          setCands(merged.cands);
+          setUsageLogs(merged.usageLogs);
+          setCfg(prev=>normalizeCfg({...prev,...merged.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken}));
+          const mergedExtraCount=Math.max(0, merged.cands.length - remote.cands.length);
+          setCloud({
+            phase:"ready",
+            message:mergedExtraCount>0?"已合并本地与云端简历库并完成同步准备":"已从云端数据库载入数据",
+            updatedAt:payload.updatedAt||remote.updatedAt||"",
+          });
         }else{
           setCloud({phase:"ready",message:"云端数据库为空，将自动上传当前浏览器数据",updatedAt:payload.updatedAt||remote.updatedAt||""});
         }
@@ -1312,7 +1416,7 @@ export default function App() {
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
-  const updCand=(id,patch)=>setCands(p=>p.map(c=>c.id===id?{...c,...patch}:c));
+  const updCand=(id,patch)=>setCands(p=>p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c));
   const recordTokens=(inp,out,prov)=>{
     const d=todayStr();
     setUsageLogs(p=>{
