@@ -650,8 +650,18 @@ const INTERVIEW_RULES_PROMPT = `【面试题生成准则】
 const buildRoleBaselinePrompt = (job, cand) => {
   const corpus = `${job?.title||""}\n${job?.requirements||""}\n${cand?.screening?.roleDirection||""}\n${cand?.resume||""}`.toLowerCase();
   const blocks = [];
+  const hasShopKeywords = /(店铺运营|店务运营|店铺管理|商品运营|货架|商城运营|电商运营|平台运营|商品|货盘|gmv|客单|选品|促销|上架|履约|客服|售后)/.test(corpus);
   const hasTrafficKeywords = /(投流|投手|信息流|优化师|买量|roi|cpm|ctr|cvr|消耗|投放)/.test(corpus);
   const hasContentKeywords = /(编导|剪辑|短视频|脚本|拍摄|pr|ae|剪映|达芬奇|内容策划|素材)/.test(corpus);
+
+  if (hasShopKeywords) {
+    blocks.push(`【该岗位基础问题池：店铺运营/商品运营方向】
+- 必问真实店铺项目：围绕店铺、商品、货盘、活动、搜索、转化、GMV、达人分销、履约或售后中的真实经历，拆解目标、动作、结果与复盘。
+- 必问活动与商品动作：如果简历写过活动策划、货盘优化、选品、上架、促销、资源位或页面改版，必须追问当时具体执行方案和判断依据。
+- 必问关键经营数据：优先问 GMV、转化率、客单、搜索流量、点击、加购、支付、活动表现，不要把问题问成纯账号涨粉或社媒运营。
+- 必问平台与协同：追问他如何和达人、客服、设计、仓配、内容或投放协同，以及谁主导节奏和决策。
+- 如果简历里只出现账号运营、涨粉、内容号增长等经历，而没有明确店铺经营动作，不要围绕这类经验大篇幅出题，优先追问它和店铺经营的实际关联，关联弱则少问或不问。`);
+  }
 
   if (hasTrafficKeywords) {
     blocks.push(`【该岗位基础问题池：信息流/投手方向】
@@ -684,8 +694,16 @@ const buildCandidateBiasPrompt = cand => {
   const resume = String(cand?.resume || "");
   const text = resume.toLowerCase();
   const hits = [];
+  const hasShopKeywords = /(店铺运营|店务运营|店铺管理|商品运营|货架|商城运营|电商运营|平台运营|商品|货盘|gmv|客单|选品|促销|上架|履约|客服|售后)/.test(text);
   const hasTrafficKeywords = /(投流|投放|信息流|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/.test(text);
   const hasContentKeywords = /(编导|剪辑|脚本|拍摄|pr|ae|剪映|达芬奇|镜头|选题|前三秒|素材)/.test(text);
+
+  if (hasShopKeywords) {
+    hits.push(`【候选人特征：店铺运营/商品运营经历明显】
+- 专业题优先围绕店铺经营、商品/货盘、活动策划、平台流量、转化、GMV、客单、达人分销和复盘动作。
+- 如果简历里同时出现账号运营/涨粉经历，也不要默认围绕账号增长展开，除非这段经历和店铺经营结果有直接关系。
+- 问数据时必须问店铺经营数据或素材判断依据，不要偏成社媒账号涨粉问题。`);
+  }
 
   if (/(主管|负责人|组长|leader|带团队|管理|汇报|kpi|考核|招聘|培养)/i.test(resume)) {
     hits.push(`【候选人特征：管理/组织生态位】
@@ -730,10 +748,95 @@ const buildCandidateBiasPrompt = cand => {
 
 const CONTENT_ROLE_RE = /(编导|剪辑|短视频|脚本|拍摄|内容策划|内容组|素材|导演|摄影|后期|视频)/i;
 const TRAFFIC_ROLE_RE = /(投流|投放|信息流|投手|优化师|买量|roi|cpm|ctr|cvr|消耗|账户|出价|人群包|计划)/i;
+const SHOP_ROLE_RE = /(店铺运营|店务运营|店铺管理|商品运营|货架|商城运营|电商运营|平台运营|店铺后台)/i;
 const PLAN_METRIC_QUESTION_RE = /(cpm|ctr|cvr|roi|投放计划|计划数据|计划的|计划层|出价|人群包|账户消耗|整条计划|五维数据链)/i;
+const CONTENT_ACCOUNT_QUESTION_RE = /(小红书|账号运营|账号涨粉|涨粉|社媒|公众号|内容号|粉丝|笔记种草|私域运营|账号矩阵)/i;
+const SHOP_EXPERIENCE_ANCHOR_RE = /(店铺|商品|货盘|活动|策划|gmv|销售额|转化|客单|促销|上架|选品|达人|商城|履约|客服|售后|流量|搜索|货架|平台运营|复盘)/i;
+const SHOP_ROLE_OPERATION_RE = /(店铺|商品|货盘|活动|选品|上架|促销|商城|货架|搜索|转化|gmv|客服|售后|达人|分销|平台运营)/i;
 
 const isContentRole = (job, cand) => CONTENT_ROLE_RE.test(`${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`);
 const isTrafficRole = (job, cand) => TRAFFIC_ROLE_RE.test(`${job?.title||""}\n${job?.requirements||""}\n${cand?.resume||""}`);
+const isShopRole = (job, cand) => SHOP_ROLE_RE.test(`${job?.title||""}\n${job?.requirements||""}\n${job?.t0||""}\n${job?.t1||""}\n${cand?.screening?.roleDirection||""}`);
+
+const extractShopRoleAnchors = (resumeText, limit = 6) => extractResumeInterviewAnchors(resumeText, 12)
+  .filter(item => SHOP_EXPERIENCE_ANCHOR_RE.test(item))
+  .slice(0, limit);
+
+const rewriteToShopQuestion = (question, cand) => {
+  const anchors = extractShopRoleAnchors(cand?.resume || "", 6);
+  const bestAnchor = anchors[0] || "店铺运营项目";
+  let nextQuestion = "请回忆一次你过去负责店铺运营项目时，具体承担了哪些动作？你是怎么判断优先级并推进执行的？";
+  let nextPurpose = "核验候选人是否真正做过店铺运营相关工作，而不是泛化的账号或内容运营";
+  let nextGood = "能结合真实店铺/商品/活动案例，讲清目标、动作、数据和复盘";
+  let nextOk = "能说出主要动作，但细节、判断依据和结果不够完整";
+  let nextBad = "只能泛谈账号内容或曝光，讲不清店铺动作与经营结果";
+  let nextRedFlag = "把店铺运营答成纯内容涨粉或账号维护，没有商品、活动、转化、流量动作";
+  let nextFollow = "继续追问当时具体做了哪些动作，哪些数据最关键，为什么这么判断";
+
+  if (/活动|策划|大促|促销/.test(bestAnchor)) {
+    nextQuestion = "请回忆一次你过去负责店铺活动策划的经历，当时具体的执行方案是什么？你怎么定节奏、资源位和转化目标？";
+    nextPurpose = "核验候选人是否真正做过店铺活动策划与落地，不只是参与配合";
+    nextGood = "能讲清活动目标、排期、资源配置、商品策略、页面动作和复盘指标";
+    nextFollow = "继续追问活动前、中、后分别盯哪些数据，发现问题后怎么临场调整";
+  } else if (/商品|货盘|选品|上架/.test(bestAnchor)) {
+    nextQuestion = "请回忆一次你过去负责商品或货盘优化的经历，你当时具体怎么判断该推哪些商品？又做了哪些调整动作？";
+    nextPurpose = "核验候选人是否具备店铺商品运营和货盘判断能力";
+    nextGood = "能讲清商品选择逻辑、价格带、转化表现和后续调整动作";
+    nextFollow = "继续追问你当时主要看哪些商品数据，哪些信号会让你加推或下架";
+  } else if (/gmv|销售额|转化|流量|搜索|货架|平台运营/.test(bestAnchor)) {
+    nextQuestion = "请回忆一次你过去提升店铺GMV或转化的案例，当时具体做了哪些动作？你主要看哪些数据判断这些动作有效？";
+    nextPurpose = "核验候选人是否真正做过店铺经营优化，而不是只做外围内容或账号维护";
+    nextGood = "能结合真实店铺案例说明流量、转化、客单或活动数据，以及对应优化动作";
+    nextFollow = "继续追问当时最关键的数据拐点是什么，你据此做了哪些后续动作";
+  }
+
+  return {
+    ...question,
+    tag: question?.tag || "专业能力",
+    subTag: "店铺运营实操",
+    principle: "岗位强匹配",
+    resumeEvidence: cleanListLine(bestAnchor),
+    question: nextQuestion,
+    purpose: nextPurpose,
+    goodAnswer: nextGood,
+    okAnswer: nextOk,
+    badAnswer: nextBad,
+    redFlag: nextRedFlag,
+    followUp: nextFollow,
+  };
+};
+
+const looksLikeShopRelevantQuestion = question => {
+  const corpus = [
+    question?.question,
+    question?.resumeEvidence,
+    question?.purpose,
+    question?.tag,
+    question?.subTag,
+    question?.followUp,
+  ].join("\n");
+  return SHOP_ROLE_OPERATION_RE.test(corpus);
+};
+
+const shouldRewriteToShopQuestion = (question, cand) => {
+  const corpus = [
+    question?.question,
+    question?.resumeEvidence,
+    question?.purpose,
+    question?.tag,
+    question?.subTag,
+    question?.followUp,
+  ].join("\n");
+  const step = Number(question?.step || 0);
+  if (step < 4 || step > 9) return false;
+  if (CONTENT_ACCOUNT_QUESTION_RE.test(corpus)) return true;
+  if (!looksLikeShopRelevantQuestion(question) && /(账号|涨粉|粉丝|笔记|内容号|社媒|公众号|小红书|短视频账号)/.test(corpus)) return true;
+  const anchors = extractShopRoleAnchors(cand?.resume || "", 4);
+  if (anchors.length && !SHOP_ROLE_OPERATION_RE.test(String(question?.resumeEvidence || "")) && /经历深挖|关键鉴别题|专业能力/.test(`${question?.stepName||""}${question?.tag||""}`)) {
+    return true;
+  }
+  return false;
+};
 
 const rewriteToContentMetricsQuestion = question => ({
   ...question,
@@ -750,11 +853,17 @@ const rewriteToContentMetricsQuestion = question => ({
 });
 
 const normalizeGeneratedQuestionsForRole = (questions, job, cand) => {
+  const shopRole = isShopRole(job, cand);
   const contentOnly = isContentRole(job, cand) && !isTrafficRole(job, cand);
-  if (!contentOnly) return questions;
   return (questions || []).map(question => {
-    if (!PLAN_METRIC_QUESTION_RE.test(String(question?.question || ""))) return question;
-    return rewriteToContentMetricsQuestion(question);
+    const questionText = String(question?.question || "");
+    if (shopRole && shouldRewriteToShopQuestion(question, cand)) {
+      return rewriteToShopQuestion(question, cand);
+    }
+    if (contentOnly && PLAN_METRIC_QUESTION_RE.test(questionText)) {
+      return rewriteToContentMetricsQuestion(question);
+    }
+    return question;
   });
 };
 
@@ -871,7 +980,15 @@ const buildQuestionPrompt = (job, cand, knowledge) => {
   const roleBaselineCtx = buildRoleBaselinePrompt(job, cand);
   const candidateBiasCtx = buildCandidateBiasPrompt(cand);
   const interviewRules = getInterviewRulesText(job);
-  const resumeAnchors = extractResumeInterviewAnchors(cand.resume, 8);
+  const shopRoleGuardrail = isShopRole(job, cand)
+    ? "12. 如果岗位是店铺运营/商品运营/货架运营，禁止围绕小红书涨粉、账号运营、内容号增长、社媒矩阵等无直接店铺经营价值的经历出题；必须优先围绕店铺活动、商品/货盘、平台流量、转化、GMV、达人分销、履约协同等真实经历提问。"
+    : "";
+  const resumeAnchors = isShopRole(job, cand)
+    ? (() => {
+        const shopAnchors = extractShopRoleAnchors(cand.resume, 8);
+        return shopAnchors.length ? shopAnchors : extractResumeInterviewAnchors(cand.resume, 8);
+      })()
+    : extractResumeInterviewAnchors(cand.resume, 8);
   return `岗位：${roleLabel} 要求：${job?.requirements||""}
 简历摘要：${cand.resume?.slice(0,500)} 筛选结论：${cand.screening?.summary}
 风险：${JSON.stringify(cand.screening?.risks||[])}
@@ -903,7 +1020,8 @@ ${candidateBiasCtx}
 8. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
 9. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
 10. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。
-11. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。`;
+11. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。
+${shopRoleGuardrail}`.trim();
 };
 
 const normalizeQuestionsPayload = payload => {
