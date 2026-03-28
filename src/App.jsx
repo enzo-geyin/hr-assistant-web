@@ -9,6 +9,7 @@ const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR
 const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
 const ENV_KNOWLEDGE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_KNOWLEDGE_URL?import.meta.env.VITE_HR_KNOWLEDGE_URL:"/api/knowledge";
 const ENV_MODEL_STATUS_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_MODEL_STATUS_URL?import.meta.env.VITE_HR_MODEL_STATUS_URL:"/api/model-status";
+const ENV_TRANSCRIBE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_TRANSCRIBE_URL?import.meta.env.VITE_HR_TRANSCRIBE_URL:"/api/transcribe";
 const CLOUD_SCHEMA_VERSION = 1;
 const KNOWLEDGE_MIN_SAMPLES = 2;
 
@@ -1381,8 +1382,15 @@ const getFileKind = file => {
   if (n.endsWith(".docx")) return "docx";
   if (type === "application/pdf" || n.endsWith(".pdf")) return "pdf";
   if (type.startsWith("image/")) return "image";
+  if (type.startsWith("audio/") || [".mp3",".m4a",".wav",".aac",".ogg",".oga",".webm",".mp4",".mpeg",".mpga"].some(ext=>n.endsWith(ext))) return "audio";
   if (type.startsWith("text/") || [".txt",".md",".markdown",".csv",".json",".html",".htm"].some(ext=>n.endsWith(ext))) return "text";
   return "unknown";
+};
+
+const resolveTranscribeUrl = proxyUrl => {
+  const raw = String(proxyUrl || "").trim() || ENV_TRANSCRIBE_URL;
+  if (!raw) return "";
+  return raw.endsWith("/api/ai") ? `${raw.slice(0, -"/api/ai".length)}/api/transcribe` : raw;
 };
 
 let pdfJsPromise;
@@ -1524,6 +1532,38 @@ const extractFileText = async file => {
   if (kind==="image") return extractImageText(file);
   throw new Error("暂不支持该文件格式");
 };
+
+async function transcribeAudioFile(cfg, file) {
+  const kind = getFileKind(file);
+  if (kind !== "audio") throw new Error("当前文件不是录音文件");
+  if ((cfg?.mode || "proxy") === "proxy") {
+    const url = resolveTranscribeUrl(cfg?.proxyUrl || "");
+    if (!url) throw new Error("请先在「设置」中填写代理服务地址");
+    const form = new FormData();
+    form.append("file", file, file.name);
+    const headers = {};
+    if (cfg?.proxyToken?.trim()) headers.Authorization = `Bearer ${cfg.proxyToken.trim()}`;
+    const res = await fetch(url, { method: "POST", headers, body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `录音转写失败 ${res.status}`);
+    return normalizeExtractedText(data.text || "");
+  }
+
+  const apiKey = cfg?.apiKeys?.openai || "";
+  if (!apiKey) throw new Error("录音转写需要 OpenAI API Key，请先在设置中填写，或切回后端代理模式");
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("model", "gpt-4o-mini-transcribe");
+  form.append("language", "zh");
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error?.message || data.message || `录音转写失败 ${res.status}`);
+  return normalizeExtractedText(data.text || "");
+}
 
 // ─── CALL AI ─────────────────────────────────────────────────
 async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
@@ -3666,7 +3706,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
 
   const queueNoteFile=file=>{
     if(!file) return;
-    if(getFileKind(file)==="unknown"){setLocalErr("仅支持 PDF、图片、Word(.docx) 或纯文本面试记录文件");return;}
+    if(getFileKind(file)==="unknown"){setLocalErr("仅支持 PDF、图片、Word(.docx)、txt / md 或录音文件");return;}
     setNoteFile(file);
     setNoteFileName(file.name);
     setLocalErr("");
@@ -3679,7 +3719,11 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setFileInfo("");
     setFileLoading(true);
     try{
-      const extracted=normalizeExtractedText(await extractFileText(noteFile)).slice(0,20000);
+      const extracted=normalizeExtractedText(
+        getFileKind(noteFile)==="audio"
+          ? await transcribeAudioFile(cfg, noteFile)
+          : await extractFileText(noteFile)
+      ).slice(0,20000);
       if(!extracted) throw new Error("未能从面试记录文件中提取到有效文字，请换一个更清晰的文件");
       const merged=notes.trim()
         ? `${notes.trim()}\n\n【上传文件：${noteFile.name}】\n${extracted}`
@@ -3742,7 +3786,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
           <div>
             <div style={{fontSize:13,fontWeight:700,color:T.text}}>上传面试记录文件</div>
-            <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx) 与纯文本文件，识别后会自动追加到笔记里</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx)、txt / md 与录音文件，识别后会自动追加到笔记里</div>
           </div>
           <button onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:fileLoading?"not-allowed":"pointer",opacity:fileLoading?0.5:1}}>选择文件</button>
         </div>
@@ -3752,12 +3796,12 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
           onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
           onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
           style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:12,padding:"18px 14px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:10}}>
-          <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
+          <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
           {fileLoading
-            ?<div><Spin text="正在识别面试记录文件..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
+            ?<div><Spin text={getFileKind(noteFile)==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
             :noteFileName
               ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
-              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、语音转写文本等</div></div>
+              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>
           }
         </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
