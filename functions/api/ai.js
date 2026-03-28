@@ -20,6 +20,7 @@ function buildClaudeUserContent(user, file) {
 
 const PROVIDERS = {
   claude: {
+    name: "Claude",
     endpoint: "https://api.anthropic.com/v1/messages",
     envKey: "ANTHROPIC_API_KEY",
     headers: apiKey => ({
@@ -40,6 +41,7 @@ const PROVIDERS = {
     text: data => data.content?.[0]?.text || "",
   },
   openai: {
+    name: "ChatGPT / OpenAI",
     endpoint: "https://api.openai.com/v1/chat/completions",
     envKey: "OPENAI_API_KEY",
     headers: apiKey => ({
@@ -61,6 +63,7 @@ const PROVIDERS = {
     text: data => data.choices?.[0]?.message?.content || "",
   },
   deepseek: {
+    name: "DeepSeek",
     endpoint: "https://api.deepseek.com/v1/chat/completions",
     envKey: "DEEPSEEK_API_KEY",
     headers: apiKey => ({
@@ -86,6 +89,7 @@ const PROVIDERS = {
     text: data => data.choices?.[0]?.message?.content || "",
   },
   kimi: {
+    name: "Kimi",
     endpoint: "https://api.moonshot.cn/v1/chat/completions",
     envKey: "KIMI_API_KEY",
     headers: apiKey => ({
@@ -214,8 +218,9 @@ async function handleRequest(request, env) {
 
   const apiKey = env[prov.envKey];
   if (!apiKey) {
+    const providerName = prov.name || provider || "当前模型";
     return json({
-      error: `当前选中的 ${prov.name} 尚未在服务端配置。请到设置页切换到已配置的模型，或在 Cloudflare 环境变量里补上 ${prov.envKey}。`,
+      error: `当前选中的 ${providerName} 尚未在服务端配置。请到设置页切换到已配置的模型，或在 Cloudflare 环境变量里补上 ${prov.envKey}。`,
     }, 500);
   }
 
