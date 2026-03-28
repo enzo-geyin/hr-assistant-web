@@ -80,6 +80,7 @@ const mergeCandidateRecord = (left, right) => {
     name: pickRicherValue(newer?.name, older?.name),
     jobId: newer?.jobId ?? older?.jobId ?? null,
     status: pickRicherValue(newer?.status, older?.status) || "pending",
+    statusSource: pickRicherValue(newer?.statusSource, older?.statusSource) || "system",
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
@@ -1752,8 +1753,15 @@ const buildDuplicateResumeError = duplicateCandidate => {
   return error;
 };
 
-async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens, dirCtx = "", jobs = [], existingCandidates = [] }) {
-  const resumePreview = await createResumeVisualPreview(file).catch(() => null);
+async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens, dirCtx = "", jobs = [], existingCandidates = [], previewMode = "full" }) {
+  const resumePreview = previewMode
+    ? await createResumeVisualPreview(
+        file,
+        previewMode === "light"
+          ? { maxPages: 1, scale: 0.95, imageQuality: 0.82 }
+          : {}
+      ).catch(() => null)
+    : null;
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
@@ -1772,9 +1780,9 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
     resumeSignature,
     resumeFileName: file.name,
     resumePreview,
-    resumePreviewStatus: resumePreview?.src ? "ready" : "none",
+    resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
     screening,
-    status: getCandidateStatusFromScore(screening.overallScore),
+    ...resolveScreeningStatusPatch(candidate, screening.overallScore),
     questions: null,
     interviews: [],
     scheduledAt: null,
@@ -1810,6 +1818,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       jobId: matchedJob?.id ?? null,
       name: candidateName,
       status: getCandidateStatusFromScore(screening.overallScore),
+      statusSource: "system",
       resume: normalizedResume,
       resumeSignature,
       resumeFileName: file.name,
@@ -1863,6 +1872,11 @@ const getScoreBand = score => {
   return { label: "淘汰", color: "#dc2626", bg: "#fef2f2", status: "rejected", range: "0 - 2.9" };
 };
 const getCandidateStatusFromScore = score => getScoreBand(score).status;
+const resolveScreeningStatusPatch = (candidate, score) => (
+  candidate?.statusSource === "manual" && candidate?.status
+    ? { status: candidate.status, statusSource: "manual" }
+    : { status: getCandidateStatusFromScore(score), statusSource: "system" }
+);
 const DASHBOARD_SCORE_GUIDE = {
   t0: [
     { label: "过去经历与目标岗位方向基本一致", level: "高" },
@@ -2309,7 +2323,8 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       updCand(candidate.id,{
         interviews:[...(candidate.interviews||[]),ni],
         scheduledAt:null,
-        status:getPostInterviewStatus(job, round, assessment.decision)
+        status:getPostInterviewStatus(job, round, assessment.decision),
+        statusSource:"system",
       });
       setInterviewTasks(prev=>{
         if(prev[candidate.id]?.taskId!==taskId) return prev;
@@ -2460,7 +2475,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
       </main>
     </div>
@@ -3096,7 +3111,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate}) {
+function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
   const sortedCands=[...cands].sort((a,b)=>{
     const batchA=a.importBatchId||"";
     const batchB=b.importBatchId||"";
@@ -3145,12 +3160,19 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
       dirCtx,
       jobs,
       existingCandidates:cands.filter(item=>item.id!==candidateId),
+      previewMode:"light",
     });
-    setCands(prev=>prev.map(item=>item.id===candidateId?{...item,...nextPatch}:item));
+    const needsPreviewUpgrade = nextPatch.resumePreview?.previewMode==="light" || (!nextPatch.resumePreview?.src && ["pdf","image"].includes(getFileKind(file)));
+    const candidatePatch = {
+      ...nextPatch,
+      resumePreviewStatus: needsPreviewUpgrade ? "generating" : nextPatch.resumePreviewStatus,
+    };
+    setCands(prev=>prev.map(item=>item.id===candidateId?{...item,...candidatePatch}:item));
+    if(needsPreviewUpgrade) startCandidatePreviewUpgrade(candidateId,file);
     setSelCand(candidateId);
     setTab("screening");
     setShowImport(false);
-    return nextPatch;
+    return candidatePatch;
   };
   return(<Page T={T} title="候选人" sub="管理所有候选人及评估进度">
     {showImport&&<ResumeImportModal T={T} jobs={jobs} cands={cands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated} onOpenCandidate={openCandidateForResumeUpdate} onReplaceExisting={replaceCandidateResume}/>}
@@ -3498,7 +3520,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         </div>
         <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
           <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
-          <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+          <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
             {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
@@ -3662,7 +3684,7 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
         resumeSignature:buildResumeSignature(normalizedResume),
         resumeFileName:nextResumeFileName,
         screening:res,
-        status:getCandidateStatusFromScore(res.overallScore)
+        ...resolveScreeningStatusPatch(cand, res.overallScore)
       });
     }catch(e){throw e;}
   };
@@ -4016,7 +4038,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
 
   const saveSchedule=()=>{
     if(!schedDate)return;
-    updCand(cand.id,{scheduledAt:`${schedDate}T${schedTime}:00`,interviewRound:round,status:"interview"});
+    updCand(cand.id,{scheduledAt:`${schedDate}T${schedTime}:00`,interviewRound:round,status:"interview",statusSource:"system"});
   };
   const clearSchedule=()=>{
     const ok=window.confirm(`确认删除 ${cand.name||"该候选人"} 的面试预约时间吗？`);
@@ -4322,7 +4344,8 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
     setLearningMsg("正在保存判断并沉淀学习样本...");
     updCand(cand.id,{
       directorVerdict:{verdict,reason,date:new Date().toLocaleDateString("zh-CN"),aiRec},
-      status:verdict==="录用"?"offer":verdict==="淘汰"?"rejected":cand.status
+      status:verdict==="录用"?"offer":verdict==="淘汰"?"rejected":cand.status,
+      statusSource:"system"
     });
     try{
       const res=await learnFromDirectorFeedback(cfg,cand,job,verdict,reason.trim(),recordTokens);

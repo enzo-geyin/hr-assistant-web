@@ -102,6 +102,7 @@ function mergeCandidateRecord(left, right) {
     name: pickRicherValue(newer?.name, older?.name),
     jobId: newer?.jobId ?? older?.jobId ?? null,
     status: pickRicherValue(newer?.status, older?.status) || "pending",
+    statusSource: pickRicherValue(newer?.statusSource, older?.statusSource) || "system",
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
