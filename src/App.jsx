@@ -196,6 +196,23 @@ async function fetchModelStatus(token = "") {
   return data;
 }
 
+const resolveProxyProviderSelection = (cfg, providers = []) => {
+  const connectedProviders = (Array.isArray(providers) ? providers : []).filter(item => item?.configured);
+  if (!connectedProviders.length) return null;
+  const connectedIds = connectedProviders.map(item => item.id).filter(Boolean);
+  const currentProviderConnected = connectedIds.includes(cfg?.provider);
+  const currentProviderModels = PROVIDERS[cfg?.provider]?.models || [];
+  const currentModelValid = currentProviderModels.some(item => item.id === cfg?.model);
+  const targetProviderId = currentProviderConnected ? cfg.provider : connectedIds[0];
+  const targetProviderModels = PROVIDERS[targetProviderId]?.models || [];
+  const targetModel = currentProviderConnected && currentModelValid
+    ? cfg.model
+    : targetProviderModels[0]?.id;
+  if (!targetProviderId || !targetModel) return null;
+  if (cfg?.provider === targetProviderId && cfg?.model === targetModel) return null;
+  return normalizeCfg({ ...(cfg || DEFAULT_CFG), provider: targetProviderId, model: targetModel });
+};
+
 async function fetchKnowledgeState(token = "", jobId) {
   if (!jobId) return { sampleCount: 0, recentSamples: [], rubric: null, questionBank: null };
   const url = `${ENV_KNOWLEDGE_URL}?jobId=${encodeURIComponent(jobId)}`;
@@ -1606,7 +1623,7 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
     if(!res?.ok) throw lastError||new Error("代理服务暂时不可用");
     const d=await res.json();
     inputT=d.usage?.input||0; outputT=d.usage?.output||0;
-    if(onTokens) onTokens(inputT,outputT,provider);
+    if(onTokens) onTokens(inputT,outputT,d.usage?.provider||d.meta?.provider||provider);
     if(d?.data && typeof d.data==="object") return d.data;
     text=typeof d?.data==="string"?d.data:"";
     const parsed=parseJsonResponse(text);
@@ -1850,11 +1867,46 @@ export default function App() {
   const [showCompare,setShowCompare]=useState(false);
   const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
   const [cloudHydrated,setCloudHydrated]=useState(false);
+  const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
 
   useEffect(()=>save("hr_cfg",cfg),[cfg]);
   useEffect(()=>save("hr_jobs",jobs),[jobs]);
   useEffect(()=>save("hr_cands",cands),[cands]);
   useEffect(()=>save("hr_usage",usageLogs),[usageLogs]);
+
+  const reloadModelStatus=async()=>{
+    if(cfg.mode==="direct"){
+      setModelStatus({loading:false,error:"",checkedAt:"",providers:[]});
+      return;
+    }
+    setModelStatus(prev=>({...prev,loading:true,error:""}));
+    try{
+      const data=await fetchModelStatus(cfg.proxyToken||"");
+      setModelStatus({
+        loading:false,
+        error:"",
+        checkedAt:data?.checkedAt||"",
+        providers:Array.isArray(data?.providers)?data.providers:[],
+      });
+    }catch(error){
+      setModelStatus({
+        loading:false,
+        error:error?.message||"模型状态读取失败",
+        checkedAt:"",
+        providers:[],
+      });
+    }
+  };
+
+  useEffect(()=>{
+    reloadModelStatus();
+  },[cfg.mode,cfg.proxyToken]);
+
+  useEffect(()=>{
+    if(cfg.mode!=="proxy" || modelStatus.loading || modelStatus.error) return;
+    const nextCfg=resolveProxyProviderSelection(cfg, modelStatus.providers);
+    if(nextCfg) setCfg(nextCfg);
+  },[cfg,modelStatus.loading,modelStatus.error,modelStatus.providers]);
 
   useEffect(()=>{
     let cancelled=false;
@@ -2310,7 +2362,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate}/>}
-        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud}/>}
+        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
       </main>
     </div>
   );
@@ -4199,10 +4251,9 @@ function ResultTab({T,cand}) {
 }
 
 // ─── SETTINGS VIEW ───────────────────────────────────────────
-function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud}) {
+function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud,modelStatus,reloadModelStatus}) {
   const [keys,setKeys]=useState(cfg.apiKeys||{});
   const [saved,setSaved]=useState("");
-  const [modelStatus,setModelStatus]=useState({loading:true,error:"",checkedAt:"",providers:[]});
   const saveKey=pid=>{setCfg(p=>({...p,apiKeys:{...p.apiKeys,[pid]:keys[pid]}}));setSaved(pid);setTimeout(()=>setSaved(""),1500);};
   const usingProxy=cfg.mode!=="direct";
   const cloudTone=cloud?.phase==="ready"?{c:"#059669",bg:"#ecfdf5"}:cloud?.phase==="syncing"||cloud?.phase==="loading"?{c:"#2563eb",bg:"#eff6ff"}:{c:"#dc2626",bg:"#fef2f2"};
@@ -4218,50 +4269,6 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
     if(cfg.provider===b && cfg.provider!==a) return 1;
     return 0;
   });
-
-  useEffect(()=>{
-    let cancelled=false;
-    const loadStatus=async()=>{
-      setModelStatus(prev=>({...prev,loading:true,error:""}));
-      try{
-        const data=await fetchModelStatus(cfg.proxyToken||"");
-        if(cancelled) return;
-        setModelStatus({
-          loading:false,
-          error:"",
-          checkedAt:data?.checkedAt||"",
-          providers:Array.isArray(data?.providers)?data.providers:[],
-        });
-      }catch(error){
-        if(cancelled) return;
-        setModelStatus({
-          loading:false,
-          error:error?.message||"模型状态读取失败",
-          checkedAt:"",
-          providers:[],
-        });
-      }
-    };
-    loadStatus();
-    return()=>{cancelled=true;};
-  },[cfg.proxyToken]);
-
-  useEffect(()=>{
-    if(!usingProxy) return;
-    if(modelStatus.loading || modelStatus.error) return;
-    if(!connectedProviders.length) return;
-    const currentProviderStatus=providerStatusMap[cfg.provider];
-    const currentProviderConnected=!!currentProviderStatus?.configured;
-    const fallbackProvider=firstConnectedProvider;
-    const currentProviderModels=PROVIDERS[cfg.provider]?.models || [];
-    const currentModelValid=currentProviderModels.some(item=>item.id===cfg.model);
-    if(currentProviderConnected && currentModelValid) return;
-    const targetProviderId=currentProviderConnected ? cfg.provider : fallbackProvider?.id;
-    const targetModel=PROVIDERS[targetProviderId]?.models?.[0]?.id;
-    if(!targetProviderId || !targetModel) return;
-    if(cfg.provider===targetProviderId && cfg.model===targetModel) return;
-    setCfg(prev=>normalizeCfg({...prev,provider:targetProviderId,model:targetModel}));
-  },[usingProxy,modelStatus.loading,modelStatus.error,connectedProviders.length,cfg.provider,cfg.model,firstConnectedProvider?.id,setCfg]);
 
   const accuracy=dirDone.map(c=>{
     const aiRec=c.screening?.recommendation||"";
@@ -4328,25 +4335,7 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
           <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
             {modelStatus.checkedAt&&<span style={{fontSize:11,color:T.text4}}>最近检查：{fmtCloudTime(modelStatus.checkedAt)}</span>}
             <button
-              onClick={async()=>{
-                setModelStatus(prev=>({...prev,loading:true,error:""}));
-                try{
-                  const data=await fetchModelStatus(cfg.proxyToken||"");
-                  setModelStatus({
-                    loading:false,
-                    error:"",
-                    checkedAt:data?.checkedAt||"",
-                    providers:Array.isArray(data?.providers)?data.providers:[],
-                  });
-                }catch(error){
-                  setModelStatus({
-                    loading:false,
-                    error:error?.message||"模型状态读取失败",
-                    checkedAt:"",
-                    providers:[],
-                  });
-                }
-              }}
+              onClick={reloadModelStatus}
               style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}
             >
               {modelStatus.loading?"检测中...":"重新检测"}

@@ -21,6 +21,8 @@ function buildClaudeUserContent(user, file) {
 const PROVIDERS = {
   claude: {
     name: "Claude",
+    defaultModel: "claude-sonnet-4-20250514",
+    models: ["claude-sonnet-4-20250514", "claude-opus-4-5", "claude-haiku-4-5-20251001"],
     endpoint: "https://api.anthropic.com/v1/messages",
     envKey: "ANTHROPIC_API_KEY",
     headers: apiKey => ({
@@ -42,6 +44,8 @@ const PROVIDERS = {
   },
   openai: {
     name: "ChatGPT / OpenAI",
+    defaultModel: "gpt-4o-mini",
+    models: ["gpt-4o", "gpt-4o-mini", "o1-mini"],
     endpoint: "https://api.openai.com/v1/chat/completions",
     envKey: "OPENAI_API_KEY",
     headers: apiKey => ({
@@ -64,6 +68,8 @@ const PROVIDERS = {
   },
   deepseek: {
     name: "DeepSeek",
+    defaultModel: "deepseek-chat",
+    models: ["deepseek-chat", "deepseek-reasoner"],
     endpoint: "https://api.deepseek.com/v1/chat/completions",
     envKey: "DEEPSEEK_API_KEY",
     headers: apiKey => ({
@@ -90,6 +96,8 @@ const PROVIDERS = {
   },
   kimi: {
     name: "Kimi",
+    defaultModel: "moonshot-v1-32k",
+    models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
     endpoint: "https://api.moonshot.cn/v1/chat/completions",
     envKey: "KIMI_API_KEY",
     headers: apiKey => ({
@@ -111,6 +119,55 @@ const PROVIDERS = {
     text: data => data.choices?.[0]?.message?.content || "",
   },
 };
+
+function getConfiguredProviderIds(env) {
+  return Object.entries(PROVIDERS)
+    .filter(([, prov]) => !!env[prov.envKey])
+    .map(([id]) => id);
+}
+
+function resolveProviderAndModel(requestedProvider, requestedModel, env, file) {
+  const configuredIds = getConfiguredProviderIds(env);
+  if (!configuredIds.length) {
+    return {
+      error: `服务端尚未配置任何模型环境变量。请至少补上 ANTHROPIC_API_KEY、OPENAI_API_KEY、DEEPSEEK_API_KEY、KIMI_API_KEY 其中之一。`,
+    };
+  }
+
+  if (file) {
+    if (!configuredIds.includes("claude")) {
+      return {
+        error: "当前任务需要直接处理 PDF / 图片文件，但服务端未配置 Claude（ANTHROPIC_API_KEY）。请先补上 Claude，或改为先提取文字再调用模型。",
+      };
+    }
+    return {
+      provider: "claude",
+      model: PROVIDERS.claude.models.includes(requestedModel) ? requestedModel : PROVIDERS.claude.defaultModel,
+      switched: requestedProvider !== "claude" || !PROVIDERS.claude.models.includes(requestedModel),
+      reason: requestedProvider !== "claude" ? `文件识别任务已自动切换到 ${PROVIDERS.claude.name}` : "",
+    };
+  }
+
+  const requestedProv = PROVIDERS[requestedProvider] ? requestedProvider : null;
+  if (requestedProv && configuredIds.includes(requestedProv)) {
+    return {
+      provider: requestedProv,
+      model: PROVIDERS[requestedProv].models.includes(requestedModel) ? requestedModel : PROVIDERS[requestedProv].defaultModel,
+      switched: !PROVIDERS[requestedProv].models.includes(requestedModel),
+      reason: !PROVIDERS[requestedProv].models.includes(requestedModel) ? `${PROVIDERS[requestedProv].name} 未识别到模型 ${requestedModel}，已自动切到默认模型` : "",
+    };
+  }
+
+  const fallbackProvider = configuredIds[0];
+  return {
+    provider: fallbackProvider,
+    model: PROVIDERS[fallbackProvider].defaultModel,
+    switched: true,
+    reason: requestedProv
+      ? `${PROVIDERS[requestedProv].name} 尚未在服务端配置，已自动切换到 ${PROVIDERS[fallbackProvider].name}`
+      : `已自动切换到当前服务端已配置的 ${PROVIDERS[fallbackProvider].name}`,
+  };
+}
 
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -205,31 +262,24 @@ async function handleRequest(request, env) {
   if (!payload) return json({ error: "请求体不是合法 JSON" }, 400);
 
   const { provider = "claude", model, system = "", user = "", file = null, maxTokens } = payload;
-  const prov = PROVIDERS[provider];
-  if (!prov) return json({ error: `不支持的 provider: ${provider}` }, 400);
   if (!model) return json({ error: "缺少 model" }, 400);
   if (!user) return json({ error: "缺少 user prompt" }, 400);
-  if (file && provider !== "claude") {
-    return json({ error: "当前代理模式下，文件识别仅支持 Claude。请切换到 Claude，或先上传 Word/文本文件。" }, 400);
-  }
   if (file && (!file.data || !file.mediaType)) {
     return json({ error: "文件负载不完整，缺少 data 或 mediaType" }, 400);
   }
-
+  const resolved = resolveProviderAndModel(provider, model, env, file);
+  if (resolved.error) return json({ error: resolved.error }, 500);
+  const resolvedProvider = resolved.provider;
+  const resolvedModel = resolved.model;
+  const prov = PROVIDERS[resolvedProvider];
   const apiKey = env[prov.envKey];
-  if (!apiKey) {
-    const providerName = prov.name || provider || "当前模型";
-    return json({
-      error: `当前选中的 ${providerName} 尚未在服务端配置。请到设置页切换到已配置的模型，或在 Cloudflare 环境变量里补上 ${prov.envKey}。`,
-    }, 500);
-  }
 
   try {
     const normalizedMaxTokens = Math.max(600, Math.min(Number(maxTokens) || 1200, 3200));
-    const firstPass = await requestUpstreamJSON(prov, apiKey, { model, system, user, file, maxTokens: normalizedMaxTokens });
+    const firstPass = await requestUpstreamJSON(prov, apiKey, { model: resolvedModel, system, user, file, maxTokens: normalizedMaxTokens });
     let parsed = firstPass.parsed;
-    let usage = { ...firstPass.usage, provider };
-    if (provider === "deepseek" && model === "deepseek-reasoner" && (!parsed || typeof parsed !== "object")) {
+    let usage = { ...firstPass.usage, provider: resolvedProvider };
+    if (resolvedProvider === "deepseek" && resolvedModel === "deepseek-reasoner" && (!parsed || typeof parsed !== "object")) {
       const fallback = await requestUpstreamJSON(prov, apiKey, {
         model: "deepseek-chat",
         system: `${system}\n\n补充要求：你现在用于结构化输出环节，必须返回稳定 JSON，不要输出思考过程、解释或代码块。`,
@@ -239,12 +289,23 @@ async function handleRequest(request, env) {
       });
       parsed = fallback.parsed;
       usage = {
-        provider,
+        provider: resolvedProvider,
         input: (usage.input || 0) + (fallback.usage.input || 0),
         output: (usage.output || 0) + (fallback.usage.output || 0),
       };
     }
-    return json({ data: parsed, usage });
+    return json({
+      data: parsed,
+      usage,
+      meta: {
+        requestedProvider: provider,
+        requestedModel: model,
+        provider: resolvedProvider,
+        model: resolvedModel,
+        autoSwitched: !!resolved.switched,
+        switchReason: resolved.reason || "",
+      },
+    });
   } catch (error) {
     return json({ error: error?.message || "构建上游请求失败" }, 400);
   }
