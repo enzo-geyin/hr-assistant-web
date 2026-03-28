@@ -1295,8 +1295,19 @@ const summarizeInterviews = cand => (cand.interviews||[])
   })
   .join("\n");
 
+const getFinalAiRecommendation = cand => {
+  const interviews = (cand?.interviews || []).filter(item => item?.assessment);
+  if (interviews.length) {
+    const latestDecision = interviews[interviews.length - 1]?.assessment?.decision || "";
+    if (latestDecision === "通过") return "建议录用";
+    if (latestDecision === "待定") return "待最终确认";
+    if (latestDecision === "淘汰") return "建议淘汰";
+  }
+  return cand?.screening?.recommendation || "";
+};
+
 const buildLearningSample = (cand, job, verdict, reason) => {
-  const aiRecommendation = cand.screening?.recommendation || "";
+  const aiRecommendation = getFinalAiRecommendation(cand);
   const directorVerdict = verdict || "";
   const mismatchType = !aiRecommendation
     ? "manual_only"
@@ -1831,7 +1842,12 @@ const STATUS={
   rejected: {label:"未通过",color:"#dc2626",bg:"#fef2f2"},
 };
 const scColor=(v,max=5)=>v/max>=0.8?"#16a34a":v/max>=0.6?"#ca8a04":"#dc2626";
-const recSt=r=>r==="建议通过"?{c:"#16a34a",bg:"#dcfce7"}:r==="待定"?{c:"#ca8a04",bg:"#fef9c3"}:{c:"#dc2626",bg:"#fee2e2"};
+const recSt = r => {
+  const text = String(r || "");
+  if (/(通过|录用)/.test(text)) return { c: "#16a34a", bg: "#dcfce7" };
+  if (/淘汰/.test(text)) return { c: "#dc2626", bg: "#fee2e2" };
+  return { c: "#ca8a04", bg: "#fef9c3" };
+};
 const getScoreBand = score => {
   const n = Number(score);
   if (!Number.isFinite(n)) return { label: "未筛选", color: "#6b7280", bg: "#f3f4f6", status: "pending", range: "等待 AI 首轮分析" };
@@ -2326,9 +2342,11 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
     ? !Object.values(cfg.apiKeys||{}).some(Boolean)
     : !String(cfg.proxyUrl||"").trim();
   const dirMatch=dirDone.filter(c=>{
-    const aiRec=c.screening?.recommendation||"";
+    const aiRec=getFinalAiRecommendation(c);
     const dir=c.directorVerdict.verdict;
-    return(aiRec==="建议通过"&&["录用","通过"].includes(dir))||(aiRec==="建议淘汰"&&dir==="淘汰");
+    const aiTone=getAiVerdictTone(aiRec);
+    const dirTone=getHumanVerdictTone(dir);
+    return aiTone!=="unknown" && aiTone===dirTone;
   });
   const dirStats={total:dirDone.length,match:dirMatch.length,rate:dirDone.length?Math.round(dirMatch.length/dirDone.length*100):0};
 
@@ -4153,7 +4171,8 @@ const getHumanVerdictTone = verdict => {
 };
 
 const buildVerdictGapAnalysis = cand => {
-  const aiRec = cand.screening?.recommendation || "";
+  const aiRec = getFinalAiRecommendation(cand);
+  const screeningRec = cand.screening?.recommendation || "";
   const humanVerdict = cand.directorVerdict?.verdict || "";
   if (!aiRec || !humanVerdict) return null;
 
@@ -4185,6 +4204,7 @@ const buildVerdictGapAnalysis = cand => {
       reasons: [
         concernLines.length ? `人工顾虑：${concernLines.join("；")}` : "",
         highlightLines.length ? `现场亮点：${highlightLines.join("；")}` : "",
+        screeningRec && screeningRec !== aiRec ? `简历初筛建议：${screeningRec}` : "",
         cand.directorVerdict?.reason ? `最终判断依据：${cand.directorVerdict.reason}` : "",
       ].filter(Boolean),
     };
@@ -4205,6 +4225,7 @@ const buildVerdictGapAnalysis = cand => {
       concernLines.length ? `人工顾虑：${concernLines.join("；")}` : "",
       highlightLines.length ? `人工补充看到的亮点：${highlightLines.join("；")}` : "",
       strongDims.length && aiTone === "negative" && humanTone === "positive" ? `被人工加权的强项：${strongDims.join("；")}` : "",
+      screeningRec && screeningRec !== aiRec ? `简历初筛建议：${screeningRec}` : "",
       riskLines.length ? `AI 初筛主要关注：${riskLines.join("；")}` : "",
       cand.directorVerdict?.reason ? `最终判断依据：${cand.directorVerdict.reason}` : "",
     ].filter(Boolean),
@@ -4219,7 +4240,8 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
   const [saving,setSaving]=useState(false);
   const [learningMsg,setLearningMsg]=useState("");
   const saved=dir.verdict&&dir.reason;
-  const aiRec=cand.screening?.recommendation;
+  const aiRec=getFinalAiRecommendation(cand);
+  const screeningRec=cand.screening?.recommendation||"";
   const gapAnalysis=saved?buildVerdictGapAnalysis(cand):null;
   const match=!!gapAnalysis?.same;
 
@@ -4279,6 +4301,7 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
             <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
             <div style={{fontSize:16,fontWeight:700,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
             <div style={{fontSize:28,fontWeight:900,color:scColor(cand.screening.overallScore),marginTop:4}}>{cand.screening.overallScore?.toFixed(1)}</div>
+            {screeningRec && screeningRec!==aiRec && <div style={{fontSize:11,color:T.text4,marginTop:6}}>简历初筛：{screeningRec}</div>}
           </div>
           <div style={{padding:"14px",background:T.card2,borderRadius:9,textAlign:"center",border:saved?`2px solid ${verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}`:undefined}}>
             <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
@@ -4335,8 +4358,7 @@ function ResultTab({T,cand}) {
   const ivs=(cand.interviews||[]).filter(i=>i.assessment);
   if(!ivs.length) return <Empty T={T} icon="◎" title="暂无评估结果" sub="完成面试记录并进行AI评估后显示"/>;
   const lat=ivs[ivs.length-1];
-  const allOk=ivs.every(i=>i.assessment?.decision==="通过");
-  const aiRec=allOk?"建议录用":lat.assessment?.decision==="待定"?"待最终确认":"建议淘汰";
+  const aiRec=getFinalAiRecommendation(cand);
   const aiTone=getAiVerdictTone(aiRec);
   const aiChip=aiTone==="positive"?{c:"#16a34a",bg:"#dcfce7"}:aiTone==="negative"?{c:"#dc2626",bg:"#fee2e2"}:{c:"#ca8a04",bg:"#fef9c3"};
   const humanVerdict=cand.directorVerdict?.verdict||"";
@@ -4410,10 +4432,10 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   });
 
   const accuracy=dirDone.map(c=>{
-    const aiRec=c.screening?.recommendation||"";
+    const aiRec=getFinalAiRecommendation(c);
     const dir=c.directorVerdict.verdict;
     const j=jobs.find(j=>j.id===c.jobId);
-    const match=(aiRec==="建议通过"&&["录用","通过"].includes(dir))||(aiRec==="建议淘汰"&&dir==="淘汰");
+    const match=getAiVerdictTone(aiRec)!=="unknown" && getAiVerdictTone(aiRec)===getHumanVerdictTone(dir);
     return{name:c.name||"未命名",job:j?.title||"",aiRec,dir,match,date:c.directorVerdict.date};
   });
 
