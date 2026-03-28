@@ -1723,6 +1723,49 @@ const findDuplicateResumeCandidate = (cands, { candidateName = "", fileName = ""
   }) || null;
 };
 
+const buildDuplicateResumeError = duplicateCandidate => {
+  const duplicateLabel = duplicateCandidate?.name || "未命名候选人";
+  const duplicateFile = duplicateCandidate?.resumeFileName ? `（${duplicateCandidate.resumeFileName}）` : "";
+  const error = new Error(`疑似重复导入：候选人「${duplicateLabel}」${duplicateFile} 已存在。若要更新，可直接打开该候选人并覆盖简历。`);
+  error.code = "DUPLICATE_RESUME";
+  error.duplicateCandidateId = duplicateCandidate?.id ?? null;
+  error.duplicateCandidateName = duplicateLabel;
+  error.duplicateCandidateFileName = duplicateCandidate?.resumeFileName || "";
+  return error;
+};
+
+async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens, dirCtx = "", jobs = [], existingCandidates = [] }) {
+  const resumePreview = await createResumeVisualPreview(file).catch(() => null);
+  const extractedResume = await extractFileText(file);
+  const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
+  const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
+  const candidateName = screening.candidateName || candidate?.name || "未命名";
+  const resumeSignature = buildResumeSignature(normalizedResume);
+  const duplicateCandidate = findDuplicateResumeCandidate(existingCandidates, {
+    candidateName,
+    fileName: file.name,
+    resumeSignature,
+  });
+  if (duplicateCandidate) throw buildDuplicateResumeError(duplicateCandidate);
+  return {
+    name: candidateName,
+    jobId: matchedJob?.id ?? candidate?.jobId ?? null,
+    resume: normalizedResume,
+    resumeSignature,
+    resumeFileName: file.name,
+    resumePreview,
+    resumePreviewStatus: resumePreview?.src ? "ready" : "none",
+    screening,
+    status: getCandidateStatusFromScore(screening.overallScore),
+    questions: null,
+    interviews: [],
+    scheduledAt: null,
+    interviewRound: null,
+    directorVerdict: null,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [], previewMode = "full", importMeta = {} }) {
   const resumePreview = previewMode
     ? await createResumeVisualPreview(
@@ -1742,11 +1785,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
     fileName: file.name,
     resumeSignature,
   });
-  if (duplicateCandidate) {
-    const duplicateLabel = duplicateCandidate.name || "未命名候选人";
-    const duplicateFile = duplicateCandidate.resumeFileName ? `（${duplicateCandidate.resumeFileName}）` : "";
-    throw new Error(`疑似重复导入：候选人「${duplicateLabel}」${duplicateFile} 已存在。若要更新，请在该候选人详情里重新上传原始简历。`);
-  }
+  if (duplicateCandidate) throw buildDuplicateResumeError(duplicateCandidate);
   return {
     candidate: {
       id: Date.now() + Math.floor(Math.random() * 1000000),
@@ -3026,8 +3065,35 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     setTab("screening");
     setShowImport(false);
   };
+  const openCandidateForResumeUpdate=candidateId=>{
+    if(!candidateId) return;
+    setSelCand(candidateId);
+    setTab("screening");
+    setShowImport(false);
+  };
+  const replaceCandidateResume=async(candidateId,file)=>{
+    if(!candidateId || !file) return;
+    const targetCandidate=cands.find(item=>item.id===candidateId);
+    if(!targetCandidate) throw new Error("没有找到要更新的候选人");
+    const effectiveJob=getEffectiveCandidateJob(jobs,targetCandidate);
+    const nextPatch=await buildCandidateResumeUpdate({
+      candidate:targetCandidate,
+      cfg,
+      job:effectiveJob,
+      file,
+      onTokens:recordTokens,
+      dirCtx,
+      jobs,
+      existingCandidates:cands.filter(item=>item.id!==candidateId),
+    });
+    setCands(prev=>prev.map(item=>item.id===candidateId?{...item,...nextPatch}:item));
+    setSelCand(candidateId);
+    setTab("screening");
+    setShowImport(false);
+    return nextPatch;
+  };
   return(<Page T={T} title="候选人" sub="管理所有候选人及评估进度">
-    {showImport&&<ResumeImportModal T={T} jobs={jobs} cands={cands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated}/>}
+    {showImport&&<ResumeImportModal T={T} jobs={jobs} cands={cands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated} onOpenCandidate={openCandidateForResumeUpdate} onReplaceExisting={replaceCandidateResume}/>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>在候选人库里直接上传简历，系统会自动识别文字、规整简历，并按所选岗位完成初筛。</div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
@@ -3075,13 +3141,13 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)} onReplaceResume={replaceCandidateResume}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);
 }
 
-function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreated}) {
+function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreated,onOpenCandidate,onReplaceExisting}) {
   const [jobId,setJobId]=useState(jobs[0]?.id ? String(jobs[0].id) : "");
   const [name,setName]=useState("");
   const [resumeFile,setResumeFile]=useState(null);
@@ -3090,6 +3156,7 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const [info,setInfo]=useState("");
+  const [duplicateInfo,setDuplicateInfo]=useState(null);
   const selectedJob=jobs.find(j=>String(j.id)===String(jobId));
 
   const queueResumeFile=file=>{
@@ -3099,20 +3166,38 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
     setResumeFileName(file.name);
     setErr("");
     setInfo("");
+    setDuplicateInfo(null);
   };
 
   const submit=async()=>{
     if(!selectedJob){setErr("请先选择岗位");return;}
     if(!resumeFile){setErr("请先上传简历文件");return;}
-    setErr("");setInfo("");setLoading(true);
+    setErr("");setInfo("");setDuplicateInfo(null);setLoading(true);
     try{
       const { candidate, screening }=await createCandidateFromResumeFile({cfg,job:selectedJob,file:resumeFile,onTokens:recordTokens,dirCtx,name,existingCandidates:cands});
       setInfo(`已完成识别与初筛：${candidate.name} / ${getScoreBand(screening.overallScore).label}`);
       onCreated(candidate);
     }catch(error){
+      if(error?.code==="DUPLICATE_RESUME"){
+        setDuplicateInfo({
+          candidateId:error.duplicateCandidateId,
+          candidateName:error.duplicateCandidateName,
+          fileName:error.duplicateCandidateFileName,
+        });
+      }
       setErr(error?.message||"上传简历失败");
     }
     setLoading(false);
+  };
+  const replaceDuplicateResume=async()=>{
+    if(!duplicateInfo?.candidateId || !resumeFile || !onReplaceExisting) return;
+    setErr("");setInfo("");setLoading(true);
+    try{
+      await onReplaceExisting(duplicateInfo.candidateId,resumeFile);
+    }catch(error){
+      setErr(error?.message||"更新简历失败");
+      setLoading(false);
+    }
   };
 
   return(
@@ -3165,6 +3250,17 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
           {selectedJob&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,marginBottom:12}}>
             当前会按岗位 <strong style={{color:T.text}}>{selectedJob.title}</strong> 的要求和学习规则做初筛。
           </div>}
+          {duplicateInfo&&<div style={{marginBottom:12,padding:"12px 14px",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:12}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#9a3412",marginBottom:6}}>检测到重复候选人</div>
+            <div style={{fontSize:12,color:"#7c2d12",lineHeight:1.8}}>
+              当前文件更像候选人 <strong>「{duplicateInfo.candidateName||"未命名候选人"}」</strong>
+              {duplicateInfo.fileName?`（${duplicateInfo.fileName}）`:""}。你可以直接打开该候选人查看，或用当前文件覆盖更新。
+            </div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:10}}>
+              <button onClick={()=>onOpenCandidate?.(duplicateInfo.candidateId)} style={{padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800}}>打开该候选人</button>
+              <button onClick={replaceDuplicateResume} disabled={loading||!resumeFile} style={{padding:"8px 12px",background:"#111827",color:"#fff",border:"none",borderRadius:10,cursor:loading||!resumeFile?"not-allowed":"pointer",fontSize:12,fontWeight:800,opacity:loading||!resumeFile?0.45:1}}>用当前文件覆盖更新</button>
+            </div>
+          </div>}
           {err&&<ErrBox>{err}</ErrBox>}
           {info&&<div style={{fontSize:12,color:"#166534",marginBottom:10,padding:"10px 12px",background:"#dcfce7",borderRadius:8}}>{info}</div>}
 
@@ -3181,13 +3277,15 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
 }
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
-function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete}) {
+function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const [showResumePreview,setShowResumePreview]=useState(true);
   const [showPreviewLightbox,setShowPreviewLightbox]=useState(false);
   const [previewZoom,setPreviewZoom]=useState(1);
   const [previewPage,setPreviewPage]=useState(0);
+  const [replaceLoading,setReplaceLoading]=useState(false);
+  const [replaceErr,setReplaceErr]=useState("");
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
@@ -3204,6 +3302,10 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     setPreviewZoom(1);
     setShowPreviewLightbox(false);
   },[cand?.id, visualPreview?.src]);
+  useEffect(()=>{
+    setReplaceLoading(false);
+    setReplaceErr("");
+  },[cand?.id]);
   const refreshLearning=async()=>{
     if(!job?.id){setLearning({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});setLearningState({loading:false,error:""});return;}
     setLearningState({loading:true,error:""});
@@ -3225,6 +3327,18 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     }
   };
   useEffect(()=>{refreshLearning();},[job?.id,cfg.proxyToken]);
+  const handleReplaceResumeFile=async file=>{
+    if(!file || !onReplaceResume) return;
+    setReplaceErr("");
+    setReplaceLoading(true);
+    try{
+      await onReplaceResume(cand.id,file);
+      setTab("screening");
+    }catch(error){
+      setReplaceErr(error?.message||"更新简历失败");
+    }
+    setReplaceLoading(false);
+  };
 
   const tabs=[
     {id:"screening",label:"① 简历筛选"},
@@ -3313,7 +3427,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"minmax(250px,1.2fr) minmax(220px,1fr) auto",gap:12,marginTop:16,alignItems:"end"}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(250px,1.2fr) minmax(220px,1fr) auto auto",gap:12,marginTop:16,alignItems:"end"}}>
         <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
           <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
           <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
@@ -3328,8 +3442,24 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
+        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14,minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+          <input
+            id={`candidate-resume-replace-${cand.id}`}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
+            style={{display:"none"}}
+            onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
+          />
+          <button
+            onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
+            style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
+          >
+            {replaceLoading?"更新中...":"重新上传原始简历"}
+          </button>
+        </div>
         <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
       </div>
+      {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
     </div>
     <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"10px 12px",background:"#f8fafc",borderRadius:12,border:`1px solid ${T.border}`}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
     {previewResume&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
@@ -3436,6 +3566,15 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const learningHint = formatRubricContext(learning);
+
+  useEffect(()=>{
+    setName(cand.name||"");
+    setResume(cand.resume||"");
+    setResumeFile(null);
+    setResumeFileName(cand.resumeFileName||"");
+    setInputMode(cand.resumeFileName?"file":"text");
+    setErr("");
+  },[cand.id,cand.updatedAt,cand.resume,cand.resumeFileName,cand.name]);
 
   const queueResumeFile=file=>{
     if(!file) return;
