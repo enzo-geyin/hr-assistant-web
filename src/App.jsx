@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
 // ─── PERSIST ─────────────────────────────────────────────────
@@ -3868,7 +3868,7 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
 
 // ─── INTERVIEW TAB ───────────────────────────────────────────
 function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,startInterviewAssessment}) {
-  const roundOptions = getInterviewRoundsForJob(job);
+  const roundOptions = useMemo(()=>getInterviewRoundsForJob(job),[job?.id,job?.level,job?.title]);
   const [round,setRound]=useState(roundOptions[0] || "一面");
   const [notes,setNotes]=useState("");
   const [schedDate,setSchedDate]=useState("");
@@ -3924,7 +3924,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setSchedDate("");
     setSchedTime("10:00");
     setRound(cand.interviewRound || roundOptions[0] || "一面");
-  },[cand.id,cand.scheduledAt,cand.interviewRound,roundOptions]);
+  },[cand.id,cand.scheduledAt,cand.interviewRound,job?.id,job?.level,job?.title]);
 
   const openPicker=ref=>{
     const input=ref?.current;
