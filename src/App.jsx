@@ -58,6 +58,14 @@ const buildCloudSnapshot = (cfg, jobs, cands, usageLogs) => ({
   usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
 });
 
+const buildRuntimeSnapshot = (cfg, jobs, cands, usageLogs) => ({
+  schemaVersion: CLOUD_SCHEMA_VERSION,
+  cfg: pickCloudCfg(cfg),
+  jobs: Array.isArray(jobs) ? jobs : [],
+  cands: Array.isArray(cands) ? cands : [],
+  usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
+});
+
 const entityTime = entity => {
   const value = entity?.updatedAt || entity?.createdAt || "";
   const ts = value ? new Date(value).getTime() : 0;
@@ -169,9 +177,19 @@ const normalizeCloudState = payload => {
 const serializeComparableCloudState = state => JSON.stringify({
   cfg: state?.cfg || {},
   jobs: Array.isArray(state?.jobs) ? state.jobs : [],
-  cands: Array.isArray(state?.cands) ? state.cands : [],
+  cands: Array.isArray(state?.cands) ? state.cands.map(sanitizeCandidateForCloud) : [],
   usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
 });
+
+const getLatestStateEntityTime = state => {
+  const jobTs = Array.isArray(state?.jobs) ? state.jobs.reduce((max, item) => Math.max(max, entityTime(item)), 0) : 0;
+  const candTs = Array.isArray(state?.cands) ? state.cands.reduce((max, item) => Math.max(max, entityTime(item)), 0) : 0;
+  const usageTs = Array.isArray(state?.usageLogs) ? state.usageLogs.reduce((max, item) => {
+    const ts = item?.date ? new Date(`${item.date}T23:59:59`).getTime() : 0;
+    return Math.max(max, Number.isFinite(ts) ? ts : 0);
+  }, 0) : 0;
+  return Math.max(jobTs, candTs, usageTs);
+};
 
 const fmtCloudTime = value => {
   if (!value) return "";
@@ -1991,6 +2009,10 @@ export default function App() {
   useEffect(()=>{
     let cancelled=false;
     const pullCloudState=async({initial=false,silent=false}={})=>{
+      const current=latestCloudStateRef.current;
+      const lastCloudTs=current.cloudUpdatedAt?new Date(current.cloudUpdatedAt).getTime():0;
+      const hasLocalUnsyncedChanges=!initial && getLatestStateEntityTime(current)>lastCloudTs;
+      if(hasLocalUnsyncedChanges) return;
       if(initial){
         setCloudHydrated(false);
         setCloud(prev=>({...prev,phase:"loading",message:"正在连接云端数据库..."}));
@@ -1998,11 +2020,10 @@ export default function App() {
         setCloud(prev=>({...prev,phase:"syncing",message:"正在同步云端最新简历库..."}));
       }
       try{
-        const current=latestCloudStateRef.current;
         const payload=await fetchCloudState(cfg.proxyToken||"");
         if(cancelled) return;
         const remote=normalizeCloudState(payload);
-        const local=normalizeCloudState(buildCloudSnapshot(current.cfg,current.jobs,current.cands,current.usageLogs));
+        const local=normalizeCloudState(buildRuntimeSnapshot(current.cfg,current.jobs,current.cands,current.usageLogs));
         const hasRemoteData=remote.jobs.length>0||remote.cands.length>0||remote.usageLogs.length>0||Object.keys(remote.cfg).length>0;
         if(hasRemoteData){
           const merged=mergeCloudSnapshots(local, remote);
@@ -2075,7 +2096,11 @@ export default function App() {
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
-  const updCand=(id,patch)=>setCands(p=>p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c));
+  const updCand=(id,patch)=>setCands(p=>{
+    const next=p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c);
+    latestCloudStateRef.current={...latestCloudStateRef.current,cands:next};
+    return next;
+  });
   const startCandidatePreviewUpgrade=async(candidateId,file)=>{
     if(!candidateId || !file || getFileKind(file)!=="pdf") return;
     updCand(candidateId,{resumePreviewStatus:"generating"});
@@ -3135,7 +3160,10 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     removeCandidate?.(candidate.id);
   };
   const onCreated=candidate=>{
-    setCands(prev=>[candidate,...prev]);
+    setCands(prev=>{
+      const next=[candidate,...prev];
+      return next;
+    });
     setSelCand(candidate.id);
     setTab("screening");
     setShowImport(false);
