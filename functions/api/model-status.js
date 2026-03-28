@@ -1,7 +1,7 @@
 const PROVIDERS = [
   { id: "claude", name: "Claude", envKey: "ANTHROPIC_API_KEY", tip: "适合文件识别与复杂结构化任务" },
   { id: "openai", name: "ChatGPT / OpenAI", envKey: "OPENAI_API_KEY", tip: "适合文本、语音与通用生成任务" },
-  { id: "deepseek", name: "DeepSeek", envKey: "DEEPSEEK_API_KEY", tip: "deepseek-chat = DeepSeek-V3.2，deepseek-reasoner = DeepSeek-V3.2（思考）；Speciale 临时接口已于 2025-12-15 到期" },
+  { id: "deepseek", name: "DeepSeek", envKey: "DEEPSEEK_API_KEY", tip: "deepseek-chat = DeepSeek-V3.2；deepseek-reasoner = DeepSeek R1（V3.2 思考）" },
   { id: "kimi", name: "Kimi", envKey: "KIMI_API_KEY", tip: "适合中文长文本场景" },
 ];
 
