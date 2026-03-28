@@ -165,6 +165,13 @@ const normalizeCloudState = payload => {
   };
 };
 
+const serializeComparableCloudState = state => JSON.stringify({
+  cfg: state?.cfg || {},
+  jobs: Array.isArray(state?.jobs) ? state.jobs : [],
+  cands: Array.isArray(state?.cands) ? state.cands : [],
+  usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
+});
+
 const fmtCloudTime = value => {
   if (!value) return "";
   const d = new Date(value);
@@ -1923,11 +1930,15 @@ export default function App() {
   const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
   const [cloudHydrated,setCloudHydrated]=useState(false);
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
+  const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,cloudUpdatedAt:""});
 
   useEffect(()=>save("hr_cfg",cfg),[cfg]);
   useEffect(()=>save("hr_jobs",jobs),[jobs]);
   useEffect(()=>save("hr_cands",cands),[cands]);
   useEffect(()=>save("hr_usage",usageLogs),[usageLogs]);
+  useEffect(()=>{
+    latestCloudStateRef.current={cfg,jobs,cands,usageLogs,cloudUpdatedAt:cloud.updatedAt||""};
+  },[cfg,jobs,cands,usageLogs,cloud.updatedAt]);
 
   const reloadModelStatus=async()=>{
     if(cfg.mode==="direct"){
@@ -1965,39 +1976,70 @@ export default function App() {
 
   useEffect(()=>{
     let cancelled=false;
-    const hydrateFromCloud=async()=>{
-      setCloudHydrated(false);
-      setCloud(prev=>({...prev,phase:"loading",message:"正在连接云端数据库..."}));
+    const pullCloudState=async({initial=false,silent=false}={})=>{
+      if(initial){
+        setCloudHydrated(false);
+        setCloud(prev=>({...prev,phase:"loading",message:"正在连接云端数据库..."}));
+      }else if(!silent){
+        setCloud(prev=>({...prev,phase:"syncing",message:"正在同步云端最新简历库..."}));
+      }
       try{
+        const current=latestCloudStateRef.current;
         const payload=await fetchCloudState(cfg.proxyToken||"");
         if(cancelled) return;
         const remote=normalizeCloudState(payload);
-        const local=normalizeCloudState(buildCloudSnapshot(cfg,jobs,cands,usageLogs));
+        const local=normalizeCloudState(buildCloudSnapshot(current.cfg,current.jobs,current.cands,current.usageLogs));
         const hasRemoteData=remote.jobs.length>0||remote.cands.length>0||remote.usageLogs.length>0||Object.keys(remote.cfg).length>0;
         if(hasRemoteData){
           const merged=mergeCloudSnapshots(local, remote);
-          setJobs(merged.jobs);
-          setCands(merged.cands);
-          setUsageLogs(merged.usageLogs);
-          setCfg(prev=>normalizeCfg({...prev,...merged.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken}));
+          const localComparable=serializeComparableCloudState(local);
+          const mergedComparable=serializeComparableCloudState(merged);
+          const hasRemoteChanges=mergedComparable!==localComparable;
+          if(hasRemoteChanges){
+            setJobs(merged.jobs);
+            setCands(merged.cands);
+            setUsageLogs(merged.usageLogs);
+            setCfg(prev=>{
+              const next=normalizeCfg({...prev,...merged.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken});
+              return JSON.stringify(pickCloudCfg(next))===JSON.stringify(pickCloudCfg(prev))?prev:next;
+            });
+          }
           const mergedExtraCount=Math.max(0, merged.cands.length - remote.cands.length);
-          setCloud({
+          setCloud(prev=>({
             phase:"ready",
-            message:mergedExtraCount>0?"已合并本地与云端简历库并完成同步准备":"已从云端数据库载入数据",
-            updatedAt:payload.updatedAt||remote.updatedAt||"",
-          });
+            message:hasRemoteChanges
+              ? (initial
+                ? (mergedExtraCount>0?"已合并本地与云端简历库并完成同步准备":"已从云端数据库载入数据")
+                : "已同步云端最新简历库")
+              : (initial ? "已从云端数据库载入数据" : (prev.message||"云端数据库已同步")),
+            updatedAt:payload.updatedAt||remote.updatedAt||prev.updatedAt||"",
+          }));
         }else{
-          setCloud({phase:"ready",message:"云端数据库为空，将自动上传当前浏览器数据",updatedAt:payload.updatedAt||remote.updatedAt||""});
+          setCloud(prev=>({
+            phase:"ready",
+            message:initial?"云端数据库为空，将自动上传当前浏览器数据":(prev.message||"云端数据库已同步"),
+            updatedAt:payload.updatedAt||remote.updatedAt||prev.updatedAt||"",
+          }));
         }
       }catch(error){
         if(cancelled) return;
         setCloud(prev=>({phase:"error",message:error?.message||"云端数据库不可用，当前继续使用本地缓存",updatedAt:prev.updatedAt||""}));
       }finally{
-        if(!cancelled) setCloudHydrated(true);
+        if(!cancelled && initial) setCloudHydrated(true);
       }
     };
-    hydrateFromCloud();
-    return()=>{cancelled=true;};
+    const onFocus=()=>pullCloudState({silent:true});
+    const onVisibility=()=>{ if(document.visibilityState==="visible") pullCloudState({silent:true}); };
+    pullCloudState({initial:true});
+    const timer=setInterval(()=>pullCloudState({silent:true}),5000);
+    window.addEventListener("focus",onFocus);
+    document.addEventListener("visibilitychange",onVisibility);
+    return()=>{
+      cancelled=true;
+      clearInterval(timer);
+      window.removeEventListener("focus",onFocus);
+      document.removeEventListener("visibilitychange",onVisibility);
+    };
   },[cfg.proxyToken]);
 
   useEffect(()=>{
