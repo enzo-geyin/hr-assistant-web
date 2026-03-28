@@ -42,6 +42,14 @@ const pickCloudCfg = cfg => ({
   proxyUrl: cfg?.proxyUrl || DEFAULT_CFG.proxyUrl,
 });
 
+const normalizeDeletedIds = list => [...new Set((Array.isArray(list) ? list : []).map(id => String(id || "").trim()).filter(Boolean))];
+const mergeDeletedIds = (left = [], right = []) => normalizeDeletedIds([...(left || []), ...(right || [])]);
+const filterDeletedCandidates = (cands = [], deletedCandidateIds = []) => {
+  const deletedSet = new Set(normalizeDeletedIds(deletedCandidateIds));
+  if (!deletedSet.size) return Array.isArray(cands) ? cands : [];
+  return (Array.isArray(cands) ? cands : []).filter(candidate => !deletedSet.has(String(candidate?.id || "").trim()));
+};
+
 const sanitizeCandidateForCloud = candidate => {
   if (!candidate || typeof candidate !== "object") return candidate;
   return {
@@ -50,20 +58,22 @@ const sanitizeCandidateForCloud = candidate => {
   };
 };
 
-const buildCloudSnapshot = (cfg, jobs, cands, usageLogs) => ({
+const buildCloudSnapshot = (cfg, jobs, cands, usageLogs, deletedCandidateIds = []) => ({
   schemaVersion: CLOUD_SCHEMA_VERSION,
   cfg: pickCloudCfg(cfg),
   jobs: Array.isArray(jobs) ? jobs : [],
-  cands: Array.isArray(cands) ? cands.map(sanitizeCandidateForCloud) : [],
+  cands: filterDeletedCandidates(cands, deletedCandidateIds).map(sanitizeCandidateForCloud),
   usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
+  deletedCandidateIds: normalizeDeletedIds(deletedCandidateIds),
 });
 
-const buildRuntimeSnapshot = (cfg, jobs, cands, usageLogs) => ({
+const buildRuntimeSnapshot = (cfg, jobs, cands, usageLogs, deletedCandidateIds = []) => ({
   schemaVersion: CLOUD_SCHEMA_VERSION,
   cfg: pickCloudCfg(cfg),
   jobs: Array.isArray(jobs) ? jobs : [],
-  cands: Array.isArray(cands) ? cands : [],
+  cands: filterDeletedCandidates(cands, deletedCandidateIds),
   usageLogs: Array.isArray(usageLogs) ? usageLogs : [],
+  deletedCandidateIds: normalizeDeletedIds(deletedCandidateIds),
 });
 
 const entityTime = entity => {
@@ -156,9 +166,13 @@ const mergeUsageLogs = (localLogs = [], remoteLogs = []) => {
 };
 
 const mergeCloudSnapshots = (localState, remoteState) => ({
+  deletedCandidateIds: mergeDeletedIds(localState.deletedCandidateIds, remoteState.deletedCandidateIds),
   cfg: { ...remoteState.cfg, ...localState.cfg },
   jobs: mergeJobsById(localState.jobs, remoteState.jobs),
-  cands: mergeCandidates(localState.cands, remoteState.cands),
+  cands: filterDeletedCandidates(
+    mergeCandidates(localState.cands, remoteState.cands),
+    mergeDeletedIds(localState.deletedCandidateIds, remoteState.deletedCandidateIds)
+  ),
   usageLogs: mergeUsageLogs(localState.usageLogs, remoteState.usageLogs),
   updatedAt: remoteState.updatedAt || localState.updatedAt || "",
 });
@@ -170,6 +184,7 @@ const normalizeCloudState = payload => {
     jobs: Array.isArray(state?.jobs) ? state.jobs : [],
     cands: Array.isArray(state?.cands) ? state.cands : [],
     usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
+    deletedCandidateIds: normalizeDeletedIds(state?.deletedCandidateIds),
     updatedAt: state?.updatedAt || payload?.updatedAt || "",
   };
 };
@@ -179,6 +194,7 @@ const serializeComparableCloudState = state => JSON.stringify({
   jobs: Array.isArray(state?.jobs) ? state.jobs : [],
   cands: Array.isArray(state?.cands) ? state.cands.map(sanitizeCandidateForCloud) : [],
   usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
+  deletedCandidateIds: normalizeDeletedIds(state?.deletedCandidateIds),
 });
 
 const getLatestStateEntityTime = state => {
@@ -1962,15 +1978,17 @@ export default function App() {
   const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
   const [cloudHydrated,setCloudHydrated]=useState(false);
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
-  const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,cloudUpdatedAt:""});
+  const [deletedCandidateIds,setDeletedCandidateIds]=useState(()=>load("hr_deleted_cands",[]));
+  const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:""});
 
   useEffect(()=>save("hr_cfg",cfg),[cfg]);
   useEffect(()=>save("hr_jobs",jobs),[jobs]);
   useEffect(()=>save("hr_cands",cands),[cands]);
   useEffect(()=>save("hr_usage",usageLogs),[usageLogs]);
+  useEffect(()=>save("hr_deleted_cands",deletedCandidateIds),[deletedCandidateIds]);
   useEffect(()=>{
-    latestCloudStateRef.current={cfg,jobs,cands,usageLogs,cloudUpdatedAt:cloud.updatedAt||""};
-  },[cfg,jobs,cands,usageLogs,cloud.updatedAt]);
+    latestCloudStateRef.current={cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:cloud.updatedAt||""};
+  },[cfg,jobs,cands,usageLogs,deletedCandidateIds,cloud.updatedAt]);
 
   const reloadModelStatus=async()=>{
     if(cfg.mode==="direct"){
@@ -2023,7 +2041,7 @@ export default function App() {
         const payload=await fetchCloudState(cfg.proxyToken||"");
         if(cancelled) return;
         const remote=normalizeCloudState(payload);
-        const local=normalizeCloudState(buildRuntimeSnapshot(current.cfg,current.jobs,current.cands,current.usageLogs));
+        const local=normalizeCloudState(buildRuntimeSnapshot(current.cfg,current.jobs,current.cands,current.usageLogs,current.deletedCandidateIds));
         const hasRemoteData=remote.jobs.length>0||remote.cands.length>0||remote.usageLogs.length>0||Object.keys(remote.cfg).length>0;
         if(hasRemoteData){
           const merged=mergeCloudSnapshots(local, remote);
@@ -2034,6 +2052,7 @@ export default function App() {
             setJobs(merged.jobs);
             setCands(merged.cands);
             setUsageLogs(merged.usageLogs);
+            setDeletedCandidateIds(merged.deletedCandidateIds||[]);
             setCfg(prev=>{
               const next=normalizeCfg({...prev,...merged.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken});
               return JSON.stringify(pickCloudCfg(next))===JSON.stringify(pickCloudCfg(prev))?prev:next;
@@ -2083,7 +2102,7 @@ export default function App() {
     const timer=setTimeout(async()=>{
       try{
         setCloud(prev=>({...prev,phase:"syncing",message:"正在同步到云端数据库..."}));
-        const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs));
+        const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
         if(cancelled) return;
         setCloud({phase:"ready",message:"云端数据库已同步",updatedAt:payload.updatedAt||""});
       }catch(error){
@@ -2092,7 +2111,7 @@ export default function App() {
       }
     },700);
     return()=>{cancelled=true;clearTimeout(timer);};
-  },[cloudHydrated,cfg.mode,cfg.provider,cfg.model,cfg.theme,cfg.proxyUrl,cfg.proxyToken,jobs,cands,usageLogs]);
+  },[cloudHydrated,cfg.mode,cfg.provider,cfg.model,cfg.theme,cfg.proxyUrl,cfg.proxyToken,jobs,cands,usageLogs,deletedCandidateIds]);
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
@@ -2136,7 +2155,17 @@ export default function App() {
   };
   const resetJobComposer=()=>setJobComposer(EMPTY_JOB_COMPOSER());
   const removeCandidate=cid=>{
-    setCands(prev=>prev.filter(c=>c.id!==cid));
+    const deletedId=String(cid||"").trim();
+    setCands(prev=>{
+      const next=prev.filter(c=>String(c.id||"").trim()!==deletedId);
+      latestCloudStateRef.current={...latestCloudStateRef.current,cands:next};
+      return next;
+    });
+    setDeletedCandidateIds(prev=>{
+      const next=mergeDeletedIds(prev,[deletedId]);
+      latestCloudStateRef.current={...latestCloudStateRef.current,deletedCandidateIds:next};
+      return next;
+    });
     setCompared(prev=>prev.filter(id=>id!==cid));
     setQuestionTasks(prev=>{
       if(!prev[cid]) return prev;

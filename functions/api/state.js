@@ -53,11 +53,26 @@ function normalizeStatePayload(raw) {
     jobs: Array.isArray(state?.jobs) ? state.jobs : [],
     cands: Array.isArray(state?.cands) ? state.cands : [],
     usageLogs: Array.isArray(state?.usageLogs) ? state.usageLogs : [],
+    deletedCandidateIds: normalizeDeletedIds(state?.deletedCandidateIds),
   };
 }
 
 function normalizeDuplicateField(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizeDeletedIds(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map(id => String(id || "").trim()).filter(Boolean))];
+}
+
+function mergeDeletedIds(left = [], right = []) {
+  return normalizeDeletedIds([...(left || []), ...(right || [])]);
+}
+
+function filterDeletedCandidates(cands = [], deletedCandidateIds = []) {
+  const deletedSet = new Set(normalizeDeletedIds(deletedCandidateIds));
+  if (!deletedSet.size) return Array.isArray(cands) ? cands : [];
+  return (Array.isArray(cands) ? cands : []).filter(candidate => !deletedSet.has(String(candidate?.id || "").trim()));
 }
 
 function normalizeExtractedText(text) {
@@ -173,12 +188,14 @@ function mergeUsageLogs(localLogs = [], remoteLogs = []) {
 }
 
 function mergeStatePayloads(incoming, existing) {
+  const deletedCandidateIds = mergeDeletedIds(incoming?.deletedCandidateIds, existing?.deletedCandidateIds);
   return {
     schemaVersion: Math.max(Number(existing?.schemaVersion) || SCHEMA_VERSION, Number(incoming?.schemaVersion) || SCHEMA_VERSION),
     cfg: { ...(existing?.cfg || {}), ...(incoming?.cfg || {}) },
     jobs: mergeJobsById(incoming?.jobs || [], existing?.jobs || []),
-    cands: mergeCandidates(incoming?.cands || [], existing?.cands || []),
+    cands: filterDeletedCandidates(mergeCandidates(incoming?.cands || [], existing?.cands || []), deletedCandidateIds),
     usageLogs: mergeUsageLogs(incoming?.usageLogs || [], existing?.usageLogs || []),
+    deletedCandidateIds,
   };
 }
 
