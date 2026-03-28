@@ -3913,6 +3913,19 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     if(!roundOptions.includes(round)) setRound(roundOptions[0] || "一面");
   },[round,roundOptions]);
 
+  useEffect(()=>{
+    if(cand.scheduledAt){
+      const [datePart="", timePart=""] = String(cand.scheduledAt).split("T");
+      setSchedDate(datePart || "");
+      setSchedTime((timePart || "").slice(0,5) || "10:00");
+      setRound(cand.interviewRound || roundOptions[0] || "一面");
+      return;
+    }
+    setSchedDate("");
+    setSchedTime("10:00");
+    setRound(cand.interviewRound || roundOptions[0] || "一面");
+  },[cand.id,cand.scheduledAt,cand.interviewRound,roundOptions]);
+
   const openPicker=ref=>{
     const input=ref?.current;
     if(!input) return;
@@ -3963,6 +3976,14 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     if(!schedDate)return;
     updCand(cand.id,{scheduledAt:`${schedDate}T${schedTime}:00`,interviewRound:round,status:"interview"});
   };
+  const clearSchedule=()=>{
+    const ok=window.confirm(`确认删除 ${cand.name||"该候选人"} 的面试预约时间吗？`);
+    if(!ok) return;
+    updCand(cand.id,{scheduledAt:null,interviewRound:null});
+    setSchedDate("");
+    setSchedTime("10:00");
+    setRound(roundOptions[0] || "一面");
+  };
 
   const assess=async()=>{
     if(!notes.trim()){setLocalErr("请填写面试笔记");return;}
@@ -3993,15 +4014,23 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
             <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:8,background:T.surface,color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
           </div>
         </div>
-        <button onClick={saveSchedule} disabled={!schedDate}
-          style={{padding:"8px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:7,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
-          确认预约
-        </button>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button onClick={saveSchedule} disabled={!schedDate}
+            style={{padding:"8px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:7,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
+            {cand.scheduledAt?"更新预约":"确认预约"}
+          </button>
+          {cand.scheduledAt&&<button
+            onClick={clearSchedule}
+            style={{padding:"8px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}
+          >
+            删除预约
+          </button>}
+        </div>
       </div>
       {isSingleRoundLevel(job?.level)&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7,padding:"8px 10px",background:T.card2,borderRadius:8}}>
         当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
       </div>}
-      {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
+      {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)} · 可直接改时间后点“更新预约”，或点“删除预约”清除安排</div>}
     </SCard>
     <SCard T={T} title="录入面试记录">
       {loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 面试综合评估正在后台运行中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
