@@ -3669,6 +3669,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const [noteDrag,setNoteDrag]=useState(false);
   const [fileLoading,setFileLoading]=useState(false);
   const [fileInfo,setFileInfo]=useState("");
+  const [fileStage,setFileStage]=useState("idle");
   const [localErr,setLocalErr]=useState("");
   const loading=!!interviewTask?.loading;
   const err=interviewTask?.error||localErr||"";
@@ -3676,6 +3677,14 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const dateInputRef=useRef(null);
   const timeInputRef=useRef(null);
   const prevInterviewCountRef=useRef((cand.interviews||[]).length);
+  const currentFileKind=noteFile?getFileKind(noteFile):"unknown";
+  const fileStageMeta={
+    idle:{label:"未上传",bg:T.card2,color:T.text4},
+    queued:{label:"已选择",bg:"#eff6ff",color:"#2563eb"},
+    processing:{label:currentFileKind==="audio"?"转写中":"识别中",bg:"#f5f3ff",color:"#7c3aed"},
+    done:{label:"已追加",bg:"#ecfdf5",color:"#16a34a"},
+    failed:{label:"失败",bg:"#fef2f2",color:"#dc2626"}
+  }[fileStage] || {label:"未上传",bg:T.card2,color:T.text4};
 
   useEffect(()=>{
     const currentCount=(cand.interviews||[]).length;
@@ -3685,6 +3694,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
       setNoteFile(null);
       setNoteFileName("");
       setFileInfo("");
+      setFileStage("idle");
       setLocalErr("");
     }
     prevInterviewCountRef.current=currentCount;
@@ -3711,6 +3721,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setNoteFileName(file.name);
     setLocalErr("");
     setFileInfo("");
+    setFileStage("queued");
   };
 
   const appendInterviewFile=async()=>{
@@ -3718,6 +3729,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setLocalErr("");
     setFileInfo("");
     setFileLoading(true);
+    setFileStage("processing");
     try{
       const extracted=normalizeExtractedText(
         getFileKind(noteFile)==="audio"
@@ -3730,8 +3742,10 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
         : `【上传文件：${noteFile.name}】\n${extracted}`;
       setNotes(merged);
       setFileInfo(`已识别并追加：${noteFile.name}`);
+      setFileStage("done");
     }catch(error){
       setLocalErr(error?.message||"面试记录文件识别失败");
+      setFileStage("failed");
     }
     setFileLoading(false);
   };
@@ -3788,7 +3802,21 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
             <div style={{fontSize:13,fontWeight:700,color:T.text}}>上传面试记录文件</div>
             <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx)、txt / md 与录音文件，识别后会自动追加到笔记里</div>
           </div>
-          <button onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:fileLoading?"not-allowed":"pointer",opacity:fileLoading?0.5:1}}>选择文件</button>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            {fileStage!=="idle"&&(
+              <span style={{
+                padding:"5px 10px",
+                borderRadius:999,
+                fontSize:11,
+                fontWeight:700,
+                background:fileStageMeta.bg,
+                color:fileStageMeta.color
+              }}>
+                {fileStageMeta.label}
+              </span>
+            )}
+            <button onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:fileLoading?"not-allowed":"pointer",opacity:fileLoading?0.5:1}}>选择文件</button>
+          </div>
         </div>
         <div
           onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
@@ -3798,7 +3826,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
           style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:12,padding:"18px 14px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:10}}>
           <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
           {fileLoading
-            ?<div><Spin text={getFileKind(noteFile)==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
+            ?<div><Spin text={currentFileKind==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
             :noteFileName
               ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
               :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>
