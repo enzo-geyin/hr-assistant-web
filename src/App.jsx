@@ -3530,6 +3530,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
 function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
+  const [searchText,setSearchText]=useState("");
   const sortedCands=[...cands].sort((a,b)=>{
     const batchA=a.importBatchId||"";
     const batchB=b.importBatchId||"";
@@ -3543,6 +3544,22 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     if(timeA!==timeB) return timeB-timeA;
     return Number(b.id||0)-Number(a.id||0);
   });
+  const candidateMatchesSearch = candidate => {
+    const query = normalizeMatchText(searchText);
+    if (!query) return true;
+    const effectiveJob = getEffectiveCandidateJob(jobs, candidate);
+    const corpus = [
+      candidate?.name,
+      candidate?.resumeFileName,
+      candidate?.screening?.roleDirection,
+      candidate?.screening?.matchedJobTitle,
+      effectiveJob?.title,
+      candidate?.status,
+      candidate?.directorVerdict?.verdict,
+    ].join("\n");
+    return normalizeMatchText(corpus).includes(query);
+  };
+  const filteredCands=sortedCands.filter(candidateMatchesSearch);
   const cand=cands.find(c=>c.id===selCand);
   const job=getEffectiveCandidateJob(jobs,cand);
   const [showImport,setShowImport]=useState(false);
@@ -3607,9 +3624,18 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     <div style={{display:"grid",gridTemplateColumns:"256px 1fr",gap:20}}>
       <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text}}>全部候选人 ({cands.length})</div>
+        <div style={{padding:"10px 12px",borderBottom:`1px solid ${T.border}`,background:T.card2}}>
+          <input
+            value={searchText}
+            onChange={e=>setSearchText(e.target.value)}
+            placeholder="搜索姓名、岗位、文件名..."
+            style={{...inSt(T),marginBottom:0,fontSize:12,padding:"9px 11px"}}
+          />
+          {!!searchText.trim()&&<div style={{fontSize:10,color:T.text4,marginTop:6}}>当前匹配 {filteredCands.length} 位候选人</div>}
+        </div>
         <div style={{overflowY:"auto",maxHeight:"calc(100vh - 160px)"}}>
-          {sortedCands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>暂无候选人</div>
-          :sortedCands.map(c=>{
+          {filteredCands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>{searchText.trim()?"没有匹配到候选人":"暂无候选人"}</div>
+          :filteredCands.map(c=>{
             const boundJob=jobs.find(j=>j.id===c.jobId);
             const effectiveJob=getEffectiveCandidateJob(jobs,c);
             const isCmp=compared.includes(c.id);
