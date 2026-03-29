@@ -841,6 +841,44 @@ const INTERVIEW_ROLE_PROFILES = [
   { label: "内容运营", matchRe: CONTENT_OPS_ROLE_RE, anchorRe: CONTENT_OPS_EXPERIENCE_ANCHOR_RE, weakQuestionRe: new RegExp(`${PLAN_METRIC_QUESTION_RE.source}|${STORE_ONLY_RE.source}`, "i") },
 ];
 
+const ROLE_QUESTION_STYLES = {
+  店铺运营: {
+    domain: "店铺经营、商品、活动、GMV、转化",
+    signal: "经营数据、用户反馈和转化信号",
+    mismatch: "账号涨粉或泛内容运营",
+  },
+  信息流投放: {
+    domain: "投放计划、素材、人群、出价、放量",
+    signal: "计划数据、素材反馈和转化信号",
+    mismatch: "纯内容制作或店铺后台杂务",
+  },
+  短视频编导: {
+    domain: "选题、脚本、前三秒、转化表达、内容复盘",
+    signal: "素材反馈、完播、点击和转化信号",
+    mismatch: "店铺经营或计划级投流数据",
+  },
+  剪辑后期: {
+    domain: "剪辑节奏、包装、调色、版本优化",
+    signal: "成片反馈、完播、点击和修改信号",
+    mismatch: "店铺经营或投放计划指标",
+  },
+  拍摄执行: {
+    domain: "机位、灯光、收音、现场执行、拍摄应变",
+    signal: "现场反馈、成片效果和执行风险信号",
+    mismatch: "店铺经营或账号涨粉结果",
+  },
+  直播运营: {
+    domain: "排品、直播节奏、主播协同、场观与转化",
+    signal: "场观、停留、点击和转化信号",
+    mismatch: "纯内容制作或账号涨粉",
+  },
+  内容运营: {
+    domain: "选题、发布节奏、互动策略、内容增长",
+    signal: "内容反馈、互动、完播和转化信号",
+    mismatch: "店铺经营或计划级投流数据",
+  },
+};
+
 const resolveInterviewRoleProfile = (job, cand) => {
   const targetText = `${job?.title||""}\n${job?.requirements||""}\n${job?.t0||""}\n${job?.t1||""}\n${cand?.screening?.roleDirection||""}`;
   const resumeText = `${cand?.resume||""}`;
@@ -859,6 +897,106 @@ const extractRoleAnchors = (profile, resumeText, limit = 6) => {
 const extractShopRoleAnchors = (resumeText, limit = 6) => extractResumeInterviewAnchors(resumeText, 12)
   .filter(item => SHOP_EXPERIENCE_ANCHOR_RE.test(item))
   .slice(0, limit);
+
+const buildRoleMatchedQuestion = (profile, question, cand, anchorOverride = "") => {
+  const style = ROLE_QUESTION_STYLES[profile?.label] || ROLE_QUESTION_STYLES["内容运营"];
+  const anchors = extractRoleAnchors(profile, cand?.resume || "", 8);
+  const anchor = cleanListLine(anchorOverride || question?.resumeEvidence || anchors[0] || "一段最能代表你的真实经历");
+  const step = Number(question?.step || 0);
+  const base = {
+    ...question,
+    principle: "岗位强匹配",
+    resumeEvidence: anchor,
+  };
+  switch (step) {
+    case 4:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: profile?.label,
+        riskPoint: `是否真做过${style.domain}`,
+        question: `简历里提到“${anchor}”，请完整还原这段经历：当时目标是什么，你具体做了哪些动作，最后结果怎样？`,
+        purpose: `核验候选人是否真做过与${profile?.label || "当前岗位"}直接相关的核心经历`,
+        goodAnswer: "能按目标、动作、结果、复盘完整拆开，并明确自己的角色",
+        okAnswer: "能讲清经历主线，但判断依据和结果细节不足",
+        badAnswer: "只能复述简历，讲不出真实动作",
+        redFlag: `把岗位问题答成${style.mismatch}，讲不出与当前岗位直接相关的动作`,
+        followUp: "继续追问当时你最先做的动作是什么，为什么先做那一步",
+      };
+    case 5:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: "执行方案",
+        riskPoint: "是否具备可落地的执行拆解能力",
+        question: `还是围绕“${anchor}”，你当时具体怎么拆执行方案、定优先级、推进落地？如果重来一次，你会改哪一步？`,
+        purpose: "核验候选人的执行方案设计能力和优先级判断",
+        goodAnswer: "能讲清执行步骤、资源安排、判断依据和迭代动作",
+        okAnswer: "能说出大致流程，但优先级和判断逻辑不够清晰",
+        badAnswer: "只会讲结果，不会拆过程",
+        redFlag: "把执行动作说成别人负责，自己只有配合",
+        followUp: "继续追问当时最难推进的一步是什么，你靠什么推动落地",
+      };
+    case 6:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: "判断依据",
+        riskPoint: `是否真的懂${style.signal}`,
+        question: `在“${anchor}”这段经历里，你当时主要看哪些${style.signal}来做判断？这些判断分别影响了你什么动作？`,
+        purpose: "核验候选人是否真的有判断依据，而不是只会描述结果",
+        goodAnswer: "能讲清关键数据或反馈信号、它们的含义和对应动作",
+        okAnswer: "知道会看一些信号，但解释不完整",
+        badAnswer: "说不清自己依据什么做判断",
+        redFlag: "完全靠感觉拍脑袋，没有过程信号支撑",
+        followUp: "继续追问当时最先看的一个信号是什么，它为什么比别的更重要",
+      };
+    case 7:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "主导度核验",
+        riskPoint: "是否只是参与者而非主导者",
+        question: `如果把“${anchor}”这件事拆开，你能具体说明哪些部分是你亲自主导、哪些是协同配合完成的吗？请别只讲团队结果。`,
+        purpose: "区分核心操盘手、主执行和参与者",
+        goodAnswer: "能明确区分主导动作、协同动作和结果归因",
+        okAnswer: "能讲部分个人动作，但边界仍不够清楚",
+        badAnswer: "一直用“我们”表述，讲不出自己具体负责什么",
+        redFlag: "把团队成绩直接等同于个人能力，没有证据证明主导度",
+        followUp: "继续追问当时如果拿掉你，这件事最可能出问题的是哪一环",
+      };
+    case 8:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "压力测试",
+        riskPoint: "岗位适配与质疑应对",
+        question: `如果我质疑“${anchor}”这段经历对当前${profile?.label || "岗位"}帮助有限，甚至更像${style.mismatch}，你会拿什么事实和逻辑来证明自己的价值？`,
+        purpose: "观察候选人在被质疑时的稳定性、事实感和沟通方式",
+        goodAnswer: "能稳住情绪，用事实、过程和结果补充说明自己的价值",
+        okAnswer: "能解释，但事实支撑偏少",
+        badAnswer: "急于反驳或只强调主观感受",
+        redFlag: "情绪化、防御性强，无法就事论事",
+        followUp: "继续追问如果我仍不认可，你还能补哪条最关键的证据",
+      };
+    case 9:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "失败复盘",
+        riskPoint: "失败归因和复盘深度",
+        question: `请再回忆一次你在${style.domain}上结果不理想的经历，当时具体哪里出了问题？你后来是怎么避免再犯的？`,
+        purpose: "看候选人面对失败时的归因方式、复盘深度和改进能力",
+        goodAnswer: "能客观复盘问题、责任和后续改进动作",
+        okAnswer: "能承认问题，但复盘不够具体",
+        badAnswer: "只怪外部环境，讲不清自己该承担什么",
+        redFlag: "无法承认错误，或者把失败说成别人问题",
+        followUp: "继续追问后来你建立了什么机制，确保类似问题不再出现",
+      };
+    default:
+      return base;
+  }
+};
 
 const rewriteToShopQuestion = (question, cand) => {
   const anchors = extractShopRoleAnchors(cand?.resume || "", 6);
@@ -1047,24 +1185,7 @@ const shouldRewriteToShopQuestion = (question, cand) => {
 
 const rewriteQuestionByRoleProfile = (profile, question, cand) => {
   if (!profile) return question;
-  switch (profile.label) {
-    case "店铺运营":
-      return rewriteToShopQuestion(question, cand);
-    case "信息流投放":
-      return rewriteToTrafficQuestion(question, cand);
-    case "短视频编导":
-      return rewriteToDirectorQuestion(question, cand);
-    case "剪辑后期":
-      return rewriteToEditorQuestion(question, cand);
-    case "拍摄执行":
-      return rewriteToShootQuestion(question, cand);
-    case "直播运营":
-      return rewriteToLiveOpsQuestion(question, cand);
-    case "内容运营":
-      return rewriteToContentOpsQuestion(question, cand);
-    default:
-      return question;
-  }
+  return buildRoleMatchedQuestion(profile, question, cand);
 };
 
 const shouldRewriteQuestionByRoleProfile = (profile, question, cand) => {
@@ -1207,6 +1328,19 @@ const QUESTION_ANCHOR_PREFERENCE = {
   10: 0,
 };
 
+const STEP_DEFAULT_RISK_POINT = {
+  1: "表达真实性与岗位相关度",
+  2: "真实生态位与职责边界",
+  3: "稳定性与求职动机",
+  4: "是否真做过核心项目",
+  5: "执行方案是否可落地",
+  6: "判断依据是否扎实",
+  7: "主导度是否注水",
+  8: "压力下是否能稳定应对",
+  9: "失败复盘是否到位",
+  10: "关注点是否成熟且匹配岗位",
+};
+
 const extractResumeInterviewAnchors = (resumeText, limit = 8) => {
   const lines = normalizeLooseListText(resumeText)
     .split(/\n+/)
@@ -1230,6 +1364,7 @@ const normalizeGeneratedQuestions = questions => {
         step: safeStep,
         stepName: cleanListLine(item?.stepName || "") || fallbackByStep.get(safeStep) || `第${safeStep}步`,
         resumeEvidence: cleanListLine(item?.resumeEvidence || ""),
+        riskPoint: cleanListLine(item?.riskPoint || ""),
       };
     })
     .sort((a, b) => Number(a.step) - Number(b.step));
@@ -1251,12 +1386,21 @@ const pickFallbackQuestionAnchor = (anchors, usedAnchors, step) => {
 
 const buildFallbackQuestionForStep = (template, roleProfile, cand, anchors, usedAnchors) => {
   const anchor = pickFallbackQuestionAnchor(anchors, usedAnchors, template.step) || "简历里最核心的一段经历";
+  if (roleProfile && template.step >= 4 && template.step <= 9) {
+    return buildRoleMatchedQuestion(
+      roleProfile,
+      { step: template.step, stepName: template.stepName, tag: template.step >= 7 ? "关键鉴别题" : "专业能力" },
+      cand,
+      anchor
+    );
+  }
   const roleLabel = roleProfile?.label || cleanListLine(cand?.screening?.roleDirection || "") || "当前岗位";
   const base = {
     step: template.step,
     stepName: template.stepName,
     principle: "只用过去看未来",
     resumeEvidence: cleanListLine(anchor),
+    riskPoint: STEP_DEFAULT_RISK_POINT[template.step] || "岗位匹配风险",
   };
   switch (template.step) {
     case 1:
@@ -1468,7 +1612,7 @@ ${rubricCtx?`${rubricCtx}\n`:""}${bankCtx?`${bankCtx}\n`:""}${feedbackGuardrails
 ${roleBaselineCtx}
 ${candidateBiasCtx}
 生成10道结构化面试题，返回JSON：
-{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","principle":"命中的准则名称","resumeEvidence":"对应简历锚点","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
+{"questions":[{"step":1,"stepName":"开场破冰","tag":"破冰","subTag":"综合观察","principle":"命中的准则名称","resumeEvidence":"对应简历锚点","riskPoint":"这道题想验证的风险点","question":"问题","purpose":"目的","goodAnswer":"好的回答...","okAnswer":"一般回答...","badAnswer":"差的回答...","redFlag":"红旗回答...","followUp":"追问方向..."}]}
 固定步骤顺序：
 1. 开场破冰
 2. 自我介绍
@@ -1486,12 +1630,15 @@ ${candidateBiasCtx}
 3. 每道题都要明确写出它命中的准则（principle）和对应的简历锚点（resumeEvidence）。
 4. 所有问题必须指向候选人的真实过往案例，默认使用“请回忆一次你过去...” “你当时具体怎么做的...” 这样的问法。
 5. 题目必须优先命中上面的“简历关键锚点”。如果简历里出现活动策划、项目操盘、素材优化、平台运营、达人对接等经历，就必须围绕这些真实经历追问具体执行方案、判断依据、复盘动作，不能脱离简历另起炉灶。
+5.1 每道题都必须写 riskPoint，明确这道题到底想验证什么，例如“是否真做过”“是否只是参与者”“是否缺少判断依据”“是否岗位适配不足”。
 6. 不要问泛泛的“如果你来我们公司会怎么做”，也不要把简历里没出现过的经历硬塞给候选人。
+6.1 所有题目优先按“目标-动作-判断-结果-复盘”结构追问，不要停留在观点、方法论或空泛经验总结。
 7. step 必须严格使用 1 到 10，每个数字只出现一次，stepName 必须与固定步骤顺序对应，不能把第10步放到前面。
 8. 每个字段都用简洁中文，单个字段尽量控制在 40 字以内，避免输出过长导致 JSON 被截断。
 9. 不要为了凑分类强行区分行为题、专业题，优先输出真正高区分度、便于追问、能从面试笔记里持续优化的问题。
 10. 如果某个字段不适合展开，也必须返回空字符串，不要省略字段。
 11. 如果候选人更偏内容/编导，而不是投流优化师，禁止生成计划级投放数据题；必须改问素材层数据、素材判断依据和内容优化动作。
+12. 10道题必须各问不同角度，禁止同一问题、同一锚点、同一能力点只换步骤重复出现。
 ${roleGuardrail}`.trim();
 };
 
@@ -4133,7 +4280,15 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
 function QCard({T,q,sourceMeta,onFeedbackChange}) {
   const [open,setOpen]=useState(false);
   const feedbackOption = getQuestionFeedbackOption(q.feedbackTag);
-  const detailRows = [["考察目标","#374151","#f9fafb",q.purpose],["好的回答","#16a34a","#f0fdf4",q.goodAnswer],["一般回答","#ca8a04","#fefce8",q.okAnswer],["差的回答","#dc2626","#fff5f5",q.badAnswer],q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],["追问方向","#4f46e5","#eef2ff",q.followUp]].filter(Boolean);
+  const detailRows = [
+    q.riskPoint && ["验证风险点","#9333ea","#faf5ff",q.riskPoint],
+    ["考察目标","#374151","#f9fafb",q.purpose],
+    ["好的回答","#16a34a","#f0fdf4",q.goodAnswer],
+    ["一般回答","#ca8a04","#fefce8",q.okAnswer],
+    ["差的回答","#dc2626","#fff5f5",q.badAnswer],
+    q.redFlag&&["红旗回答","#7f1d1d","#fef2f2",q.redFlag],
+    ["追问方向","#4f46e5","#eef2ff",q.followUp]
+  ].filter(Boolean);
   return(<div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:16,padding:16,marginBottom:10,boxShadow:"0 12px 28px rgba(15,23,42,0.06)"}}>
     <div style={{cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}} onClick={()=>setOpen(!open)}>
       <div style={{flex:1,marginRight:10}}>
