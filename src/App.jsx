@@ -1194,6 +1194,19 @@ const QUESTION_STEP_TEMPLATES = [
   { step: 10, stepName: "反问" },
 ];
 
+const QUESTION_ANCHOR_PREFERENCE = {
+  1: 0,
+  2: 0,
+  3: 1,
+  4: 0,
+  5: 1,
+  6: 2,
+  7: 0,
+  8: 1,
+  9: 2,
+  10: 0,
+};
+
 const extractResumeInterviewAnchors = (resumeText, limit = 8) => {
   const lines = normalizeLooseListText(resumeText)
     .split(/\n+/)
@@ -1220,6 +1233,206 @@ const normalizeGeneratedQuestions = questions => {
       };
     })
     .sort((a, b) => Number(a.step) - Number(b.step));
+};
+
+const buildQuestionSignature = question => normalizeMatchText(question?.question || "");
+
+const pickFallbackQuestionAnchor = (anchors, usedAnchors, step) => {
+  const list = (anchors || []).map(cleanListLine).filter(Boolean);
+  if (!list.length) return "";
+  const preferredIndex = QUESTION_ANCHOR_PREFERENCE[step] ?? 0;
+  for (let offset = 0; offset < list.length; offset += 1) {
+    const anchor = list[(preferredIndex + offset) % list.length];
+    const key = normalizeMatchText(anchor);
+    if (key && !usedAnchors.has(key)) return anchor;
+  }
+  return list[preferredIndex % list.length];
+};
+
+const buildFallbackQuestionForStep = (template, roleProfile, cand, anchors, usedAnchors) => {
+  const anchor = pickFallbackQuestionAnchor(anchors, usedAnchors, template.step) || "简历里最核心的一段经历";
+  const roleLabel = roleProfile?.label || cleanListLine(cand?.screening?.roleDirection || "") || "当前岗位";
+  const base = {
+    step: template.step,
+    stepName: template.stepName,
+    principle: "只用过去看未来",
+    resumeEvidence: cleanListLine(anchor),
+  };
+  switch (template.step) {
+    case 1:
+      return {
+        ...base,
+        tag: "破冰",
+        subTag: "综合观察",
+        question: `先从“${anchor}”这段经历开始，请你用最简洁的方式介绍一下这段经历为什么最能代表你现在的岗位能力。`,
+        purpose: "用候选人最熟的真实经历开场，先看表达清晰度和真实感",
+        goodAnswer: "能迅速讲清背景、角色、动作和结果，且和当前岗位相关",
+        okAnswer: "能讲清大概经历，但重点不够聚焦",
+        badAnswer: "只重复简历，没有具体做法和结果",
+        redFlag: "一开口就是空泛概念，讲不清真实项目",
+        followUp: "追问当时最关键的动作是什么，为什么由你来做",
+      };
+    case 2:
+      return {
+        ...base,
+        tag: "背景核实",
+        subTag: "组织架构",
+        principle: "必须覆盖过去公司的组织架构",
+        question: `围绕“${anchor}”这段经历，请具体说说当时团队结构、你的汇报对象、协同对象，以及你真正负责的边界。`,
+        purpose: "核验候选人真实生态位，避免只听 title",
+        goodAnswer: "能讲清组织结构、汇报关系、分工边界和真实主导范围",
+        okAnswer: "能讲清团队关系，但职责边界偏模糊",
+        badAnswer: "只会讲 title，讲不清谁管谁、谁做什么",
+        redFlag: "把自己包装成负责人，却说不清真实汇报链和协同边界",
+        followUp: "继续追问你真正拍板过什么，哪些事情必须先向上汇报",
+      };
+    case 3:
+      return {
+        ...base,
+        tag: "动机考察",
+        subTag: "稳定性",
+        question: `请结合“${anchor}”这段经历和最近一份工作，具体说说你当时离开的真实原因，以及这次换工作的核心诉求。`,
+        purpose: "判断离职动机、稳定性和岗位匹配预期",
+        goodAnswer: "能具体说明离开原因、客观限制和下一份工作的真实诉求",
+        okAnswer: "能说出原因，但更多是泛泛表述",
+        badAnswer: "只说发展、学习等空话，避开真实原因",
+        redFlag: "频繁归因外部，回避自己决策和适配问题",
+        followUp: "继续追问如果遇到类似问题，你下一份工作会怎么降低重复发生的概率",
+      };
+    case 4:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: "项目还原",
+        principle: "岗位强匹配",
+        question: `简历里提到“${anchor}”，请把这段经历完整还原一遍：当时目标是什么，你具体做了哪些动作，最后结果怎样？`,
+        purpose: `核验候选人是否真做过与${roleLabel}相关的核心经历`,
+        goodAnswer: "能按目标、动作、结果、复盘完整拆开，并明确个人角色",
+        okAnswer: "能讲清主要动作，但判断依据和结果细节不足",
+        badAnswer: "只能重复简历表述，讲不出真实执行过程",
+        redFlag: "把亲身经历答成团队概况，缺少自己的具体动作",
+        followUp: "继续追问当时哪一步最关键，为什么先做那一步",
+      };
+    case 5:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: "执行拆解",
+        principle: "显性指标打假",
+        question: `还是围绕“${anchor}”这件事，你当时具体怎么拆执行方案、定优先级、推进落地？如果重来一次，你会改哪一步？`,
+        purpose: "深挖候选人的执行方案设计能力和优先级判断",
+        goodAnswer: "能拆清执行步骤、资源安排、判断依据和迭代动作",
+        okAnswer: "知道大致流程，但优先级和判断逻辑不够清晰",
+        badAnswer: "只会讲结果，不会拆过程",
+        redFlag: "把执行动作说成别人负责，自己只有配合",
+        followUp: "继续追问当时哪一步最容易失控，你怎么稳住结果",
+      };
+    case 6:
+      return {
+        ...base,
+        tag: "专业能力",
+        subTag: "判断依据",
+        principle: "显性指标打假",
+        question: `在“${anchor}”这段经历里，你当时主要看哪些信号、数据或反馈来做判断？这些判断分别影响了你什么动作？`,
+        purpose: "核验候选人是否真的有判断依据，而不是只会描述结果",
+        goodAnswer: "能讲清关键判断信号、数据含义和对应动作",
+        okAnswer: "知道会看反馈或数据，但解释不完整",
+        badAnswer: "说不清自己依据什么做判断",
+        redFlag: "完全靠感觉拍脑袋，没有过程数据或反馈支撑",
+        followUp: "继续追问当时最先看的一个信号是什么，它为什么比别的更重要",
+      };
+    case 7:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "主导度核验",
+        principle: "显性指标打假",
+        question: `如果把“${anchor}”这件事拆开，你能具体说明哪些部分是你亲自主导、哪些是协同配合完成的吗？请别只讲团队结果。`,
+        purpose: "区分核心操盘手、主执行和参与者",
+        goodAnswer: "能明确区分主导动作、协同动作和结果归因",
+        okAnswer: "能讲部分个人动作，但边界仍不够清楚",
+        badAnswer: "一直用“我们”表述，讲不出自己具体负责什么",
+        redFlag: "把团队成绩直接等同于个人能力，没有证据证明主导度",
+        followUp: "继续追问当时如果拿掉你，这件事最可能出问题的是哪一环",
+      };
+    case 8:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "压力测试",
+        principle: "对抗性压力测试",
+        question: `如果我质疑“${anchor}”这段经历的结果含金量不够，或者觉得它对当前岗位帮助有限，你会拿什么事实和逻辑来证明自己的价值？`,
+        purpose: "观察候选人在质疑和压力下的稳定性、事实感和沟通方式",
+        goodAnswer: "能稳住情绪，用事实、过程和结果补充说明自己的价值",
+        okAnswer: "能解释，但事实支撑偏少",
+        badAnswer: "急于反驳或只强调主观感受",
+        redFlag: "情绪化、防御性强，无法就事论事",
+        followUp: "继续追问如果最后我仍不认可，你会如何补充最关键的一条证据",
+      };
+    case 9:
+      return {
+        ...base,
+        tag: "关键鉴别题",
+        subTag: "失败复盘",
+        principle: "隐性指标挖掘",
+        question: `请再回忆一次和“${anchor}”相近、但结果不理想的经历，当时哪里出了问题？你后来是怎么避免再犯的？`,
+        purpose: "看候选人面对失败时的归因方式、复盘深度和改进能力",
+        goodAnswer: "能客观复盘问题、责任和后续改进动作",
+        okAnswer: "能承认问题，但复盘不够具体",
+        badAnswer: "只怪外部环境，讲不清自己该承担什么",
+        redFlag: "无法承认错误，或者把失败说成别人问题",
+        followUp: "继续追问后来你做了什么机制化动作，确保类似问题不再出现",
+      };
+    case 10:
+    default:
+      return {
+        ...base,
+        tag: "收尾",
+        subTag: "反问",
+        principle: "综合观察",
+        question: "你还有什么问题想进一步了解？也可以直接说说你决定 offer 时最在意的两个条件。",
+        purpose: "看候选人关注点是否成熟、务实且与岗位匹配",
+        goodAnswer: "问题聚焦岗位、团队、目标或资源边界，判断成熟",
+        okAnswer: "有一些问题，但更多停留在表层",
+        badAnswer: "完全没有问题，或只问福利八卦",
+        redFlag: "只关注短期利益，不关心岗位和工作内容",
+        followUp: "追问如果这两个条件里只能满足一个，你会怎么选，为什么",
+      };
+  }
+};
+
+const ensureUniqueGeneratedQuestions = (questions, job, cand) => {
+  const roleProfile = resolveInterviewRoleProfile(job, cand);
+  const anchors = dedupeLines([
+    ...extractRoleAnchors(roleProfile, cand?.resume || "", 12),
+    ...extractResumeInterviewAnchors(cand?.resume || "", 12),
+  ]).filter(Boolean);
+  const usedSignatures = new Set();
+  const usedAnchors = new Set();
+  const result = [];
+
+  QUESTION_STEP_TEMPLATES.forEach(template => {
+    const stepCandidates = (questions || []).filter(item => Number(item?.step) === template.step);
+    let picked = stepCandidates.find(item => {
+      const signature = buildQuestionSignature(item);
+      return signature && !usedSignatures.has(signature);
+    });
+    if (!picked) {
+      picked = buildFallbackQuestionForStep(template, roleProfile, cand, anchors, usedAnchors);
+    }
+    const signature = buildQuestionSignature(picked);
+    if (signature) usedSignatures.add(signature);
+    if (picked?.resumeEvidence) {
+      usedAnchors.add(normalizeMatchText(picked.resumeEvidence));
+    }
+    result.push({
+      ...picked,
+      step: template.step,
+      stepName: template.stepName,
+    });
+  });
+
+  return result;
 };
 
 const buildQuestionPrompt = (job, cand, knowledge) => {
@@ -2320,7 +2533,11 @@ export default function App() {
         {maxTokens:3000}
       );
       if(res.error) throw new Error(res.raw||res.error);
-      const questions=normalizeGeneratedQuestionsForRole(normalizeQuestionsPayload(res), job, candidate);
+      const questions=ensureUniqueGeneratedQuestions(
+        normalizeGeneratedQuestionsForRole(normalizeQuestionsPayload(res), job, candidate),
+        job,
+        candidate
+      );
       if(!questions.length) throw new Error("模型已返回内容，但没有识别到有效的面试题列表");
       updCand(candidate.id,{questions});
       setQuestionTasks(prev=>{
