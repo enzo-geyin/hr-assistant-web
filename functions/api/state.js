@@ -111,13 +111,17 @@ function sanitizeCandidateForCloud(candidate) {
 function mergeCandidateRecord(left, right) {
   const newer = entityTime(left) > entityTime(right) ? left : right;
   const older = newer === left ? right : left;
+  const mergedTime = Math.max(entityTime(left), entityTime(right));
+  const manualStatusRecord = [left, right]
+    .filter(item => item?.statusSource === "manual" && item?.status)
+    .sort((a, b) => entityTime(b) - entityTime(a))[0];
   return sanitizeCandidateForCloud({
     ...older,
     ...newer,
     name: pickRicherValue(newer?.name, older?.name),
     jobId: newer?.jobId ?? older?.jobId ?? null,
-    status: pickRicherValue(newer?.status, older?.status) || "pending",
-    statusSource: pickRicherValue(newer?.statusSource, older?.statusSource) || "system",
+    status: manualStatusRecord?.status || pickRicherValue(newer?.status, older?.status) || "pending",
+    statusSource: manualStatusRecord ? "manual" : (pickRicherValue(newer?.statusSource, older?.statusSource) || "system"),
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
@@ -127,7 +131,7 @@ function mergeCandidateRecord(left, right) {
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
     directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
-    updatedAt: new Date(Math.max(entityTime(left), entityTime(right), Date.now())).toISOString(),
+    updatedAt: (mergedTime ? new Date(mergedTime) : new Date()).toISOString(),
   });
 }
 

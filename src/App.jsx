@@ -92,13 +92,17 @@ const pickRicherValue = (preferred, fallback) => {
 const mergeCandidateRecord = (left, right) => {
   const newer = entityTime(left) > entityTime(right) ? left : right;
   const older = newer === left ? right : left;
+  const mergedTime = Math.max(entityTime(left), entityTime(right));
+  const manualStatusRecord = [left, right]
+    .filter(item => item?.statusSource === "manual" && item?.status)
+    .sort((a, b) => entityTime(b) - entityTime(a))[0];
   return {
     ...older,
     ...newer,
     name: pickRicherValue(newer?.name, older?.name),
     jobId: newer?.jobId ?? older?.jobId ?? null,
-    status: pickRicherValue(newer?.status, older?.status) || "pending",
-    statusSource: pickRicherValue(newer?.statusSource, older?.statusSource) || "system",
+    status: manualStatusRecord?.status || pickRicherValue(newer?.status, older?.status) || "pending",
+    statusSource: manualStatusRecord ? "manual" : (pickRicherValue(newer?.statusSource, older?.statusSource) || "system"),
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
@@ -109,7 +113,7 @@ const mergeCandidateRecord = (left, right) => {
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
     directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
-    updatedAt: new Date(Math.max(entityTime(left), entityTime(right), Date.now())).toISOString(),
+    updatedAt: (mergedTime ? new Date(mergedTime) : new Date()).toISOString(),
   };
 };
 
@@ -2410,7 +2414,7 @@ export default function App() {
           const hasRemoteChanges=mergedComparable!==localComparable;
           if(hasRemoteChanges){
             setJobs(merged.jobs);
-            setCands(merged.cands);
+            setCandsSynced(merged.cands);
             setUsageLogs(merged.usageLogs);
             setDeletedCandidateIds(merged.deletedCandidateIds||[]);
             setCfg(prev=>{
@@ -2475,9 +2479,13 @@ export default function App() {
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
-  const updCand=(id,patch)=>setCands(p=>{
-    const next=p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c);
+  const setCandsSynced = updater => setCands(prev=>{
+    const next = typeof updater === "function" ? updater(prev) : updater;
     latestCloudStateRef.current={...latestCloudStateRef.current,cands:next};
+    return next;
+  });
+  const updCand=(id,patch)=>setCandsSynced(p=>{
+    const next=p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c);
     return next;
   });
   const startCandidatePreviewUpgrade=async(candidateId,file)=>{
@@ -2516,9 +2524,8 @@ export default function App() {
   const resetJobComposer=()=>setJobComposer(EMPTY_JOB_COMPOSER());
   const removeCandidate=cid=>{
     const deletedId=String(cid||"").trim();
-    setCands(prev=>{
+    setCandsSynced(prev=>{
       const next=prev.filter(c=>String(c.id||"").trim()!==deletedId);
-      latestCloudStateRef.current={...latestCloudStateRef.current,cands:next};
       return next;
     });
     setDeletedCandidateIds(prev=>{
@@ -2610,7 +2617,7 @@ export default function App() {
           },
         });
         created.push(candidate);
-        setCands(prev=>[candidate,...prev]);
+        setCandsSynced(prev=>[candidate,...prev]);
         nextResults[key]={
           status:"success",
           message:`已导入：${candidate.name||"未命名候选人"} · ${getScoreBand(candidate.screening?.overallScore).label}${candidate.resumePreview?.previewMode==="light"?" · 正在后台补全完整预览":""}`,
@@ -3348,7 +3355,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
     setJobs(p=>[...p,j]);setSelJob(j.id);
     resetCreateForm();
   };
-  const delJob=id=>{if(window.confirm("确认删除该岗位及所有候选人？")){setJobs(p=>p.filter(j=>j.id!==id));setCands(p=>p.filter(c=>c.jobId!==id));if(selJob===id)setSelJob(null);}};
+  const delJob=id=>{if(window.confirm("确认删除该岗位及所有候选人？")){setJobs(p=>p.filter(j=>j.id!==id));setCandsSynced(p=>p.filter(c=>c.jobId!==id));if(selJob===id)setSelJob(null);}};
   const job=jobs.find(j=>j.id===selJob);
   const jobCands=cands.filter(c=>c.jobId===selJob);
   useEffect(()=>{
@@ -3364,7 +3371,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
   };
   const addCand=()=>{
     const id=Date.now();
-    setCands(p=>[...p,{id,jobId:selJob,name:"",status:"pending",resume:"",screening:null,questions:null,interviews:[],scheduledAt:null,interviewRound:null,directorVerdict:null}]);
+    setCandsSynced(p=>[...p,{id,jobId:selJob,name:"",status:"pending",resume:"",screening:null,questions:null,interviews:[],scheduledAt:null,interviewRound:null,directorVerdict:null}]);
     onCandClick(id,selJob);
   };
   const saveInterviewRules=()=>{
@@ -3570,7 +3577,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
     removeCandidate?.(candidate.id);
   };
   const onCreated=candidate=>{
-    setCands(prev=>{
+    setCandsSynced(prev=>{
       const next=[candidate,...prev];
       return next;
     });
@@ -3605,7 +3612,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
       ...nextPatch,
       resumePreviewStatus: needsPreviewUpgrade ? "generating" : nextPatch.resumePreviewStatus,
     };
-    setCands(prev=>prev.map(item=>item.id===candidateId?{...item,...candidatePatch}:item));
+    setCandsSynced(prev=>prev.map(item=>item.id===candidateId?{...item,...candidatePatch}:item));
     if(needsPreviewUpgrade) startCandidatePreviewUpgrade(candidateId,file);
     setSelCand(candidateId);
     setTab("screening");
