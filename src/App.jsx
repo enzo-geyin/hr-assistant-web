@@ -3000,70 +3000,82 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
       return date.toISOString().slice(0,10) === todayStr();
     })
     .sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+  const dashboardShell={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:CARD_RADIUS,
+    boxShadow:SOFT_SHADOW,
+  };
+  const passRate=total>0?Math.round(cands.filter(c=>["screening","interview","offer"].includes(c.status)).length/total*100):0;
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
-    {/* 板块1：数据看板 */}
     <SecLabel T={T}>数据看板</SecLabel>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12,marginBottom:14}}>
-      {stats.map(s=>(
-        <div key={s.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",borderTop:`3px solid ${s.color}`,boxShadow:SOFT_SHADOW}}>
-          <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1}}>{s.val}</div>
-          <div style={{fontSize:12,color:T.text3,marginTop:5}}>{s.label}</div>
+    <div style={{...dashboardShell,padding:"22px 22px 18px",marginBottom:24}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0, 1.5fr) minmax(320px, 0.9fr)",gap:16,alignItems:"stretch"}}>
+        <div style={{display:"grid",gap:14}}>
+          <div>
+            <div style={{fontSize:24,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>招聘运营总览</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:720}}>先看今天必须处理的面试，再看整体候选人流转和岗位状态。首页只保留最关键的数字和入口，不让信息分散在很多小卡片里。</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(148px,1fr))",gap:10}}>
+            {stats.map(s=>(
+              <div key={s.label} style={{padding:"14px 14px 12px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.04)"}}>
+                <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{s.label}</div>
+                <div style={{fontSize:30,fontWeight:900,color:s.color,lineHeight:1,marginTop:10}}>{s.val}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"14px 16px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+              <div style={{fontSize:12,color:T.text3}}>总候选人 <strong style={{color:T.text,fontWeight:800}}>{total}</strong> 人</div>
+              <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                {dirStats.total>0&&<span style={{fontSize:12,color:T.text3}}>总监沉淀 {dirStats.total} 案例 · AI匹配率 <strong style={{color:dirStats.rate>=70?"#16a34a":"#ca8a04"}}>{dirStats.rate}%</strong></span>}
+                <span style={{fontSize:12,fontWeight:800,color:T.accent}}>通过率 {passRate}%</span>
+              </div>
+            </div>
+            <div style={{height:8,background:T.border,borderRadius:999,display:"flex",overflow:"hidden"}}>
+              {[["screening","#2563eb"],["watching","#d97706"],["interview","#7c3aed"],["offer","#059669"],["rejected","#dc2626"]].map(([s,c])=>{
+                const v=cands.filter(x=>x.status===s).length;
+                return total>0&&v>0?<div key={s} style={{width:`${v/total*100}%`,background:c}}/>:null;
+              })}
+            </div>
+          </div>
         </div>
-      ))}
-    </div>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"14px 18px",marginBottom:24,boxShadow:SOFT_SHADOW}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-        <span style={{fontSize:12,color:T.text3}}>总候选人 {total} 人</span>
-        <div style={{display:"flex",gap:16}}>
-          {dirStats.total>0&&<span style={{fontSize:12,color:T.text3}}>总监沉淀 {dirStats.total} 案例 · AI匹配率 <strong style={{color:dirStats.rate>=70?"#16a34a":"#ca8a04"}}>{dirStats.rate}%</strong></span>}
-          <span style={{fontSize:12,fontWeight:700,color:T.accent}}>通过率 {total>0?Math.round(cands.filter(c=>["screening","interview","offer"].includes(c.status)).length/total*100):0}%</span>
+        <div style={{padding:"16px 16px 14px",borderRadius:18,background:"linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)",border:"1px solid #e9d5ff",boxShadow:"0 14px 32px rgba(124,58,237,0.08)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:900,color:T.text}}>今日面试安排</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>今天排期的候选人会固定放在这里，直接从首页进入面试记录。</div>
+            </div>
+            <Chip c="#7c3aed" bg="#ede9fe" lg>{`${todayInterviewCandidates.length} 场`}</Chip>
+          </div>
+          {todayInterviewCandidates.length===0
+            ? <div style={{padding:"18px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,fontSize:12,color:T.text4,lineHeight:1.8}}>今天还没有已排期的面试。安排好时间后，这里会自动出现快捷入口。</div>
+            : <div style={{display:"grid",gap:10}}>
+                {todayInterviewCandidates.map(candidate=>{
+                  const candidateJob = getEffectiveCandidateJob(jobs, candidate);
+                  return(
+                    <button
+                      key={candidate.id}
+                      onClick={()=>onCandClick(candidate.id,candidate.jobId)}
+                      className="hr"
+                      style={{padding:"13px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}
+                    >
+                      <div style={{minWidth:0}}>
+                        <div style={{fontSize:14,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidate.name||"未命名候选人"}</div>
+                        <div style={{fontSize:11,color:T.text4,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidateJob?.title||candidate.screening?.roleDirection||"未绑定岗位"}</div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0}}>
+                        <div style={{fontSize:18,fontWeight:900,color:"#7c3aed",lineHeight:1}}>{fmtDate(candidate.scheduledAt)}</div>
+                        <div style={{fontSize:11,color:"#7c3aed",fontWeight:800,marginTop:4}}>{candidate.interviewRound||"面试"} · 进入记录</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>}
         </div>
       </div>
-      <div style={{height:6,background:T.border,borderRadius:3,display:"flex",overflow:"hidden"}}>
-        {[["screening","#2563eb"],["watching","#d97706"],["interview","#7c3aed"],["offer","#059669"],["rejected","#dc2626"]].map(([s,c])=>{
-          const v=cands.filter(x=>x.status===s).length;
-          return total>0&&v>0?<div key={s} style={{width:`${v/total*100}%`,background:c}}/>:null;
-        })}
-      </div>
-    </div>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",marginBottom:24,boxShadow:SOFT_SHADOW}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:14,fontWeight:800,color:T.text}}>今日面试安排</div>
-          <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>把今天已排期的候选人直接放在首页，方便你快速进入面试记录。</div>
-        </div>
-        <Chip c="#7c3aed" bg="#f5f3ff" lg>{`${todayInterviewCandidates.length} 场`}</Chip>
-      </div>
-      {todayInterviewCandidates.length===0
-        ? <div style={{padding:"18px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,fontSize:12,color:T.text4}}>今天还没有已排期的面试。</div>
-        : <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12}}>
-            {todayInterviewCandidates.map(candidate=>{
-              const candidateJob = getEffectiveCandidateJob(jobs, candidate);
-              return(
-                <button
-                  key={candidate.id}
-                  onClick={()=>onCandClick(candidate.id,candidate.jobId)}
-                  className="hr"
-                  style={{padding:"14px 14px 13px",background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:14,cursor:"pointer",textAlign:"left",boxShadow:"0 10px 24px rgba(124,58,237,0.08)"}}
-                >
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
-                    <div style={{minWidth:0}}>
-                      <div style={{fontSize:15,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidate.name||"未命名候选人"}</div>
-                      <div style={{fontSize:11,color:T.text4,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidateJob?.title||candidate.screening?.roleDirection||"未绑定岗位"}</div>
-                    </div>
-                    <Chip c="#7c3aed" bg="#ede9fe">{candidate.interviewRound||"面试"}</Chip>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-                    <div style={{fontSize:20,fontWeight:900,color:"#7c3aed"}}>{fmtDate(candidate.scheduledAt)}</div>
-                    <span style={{fontSize:12,fontWeight:700,color:"#7c3aed"}}>进入记录 →</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>}
     </div>
 
-    {/* 板块2：在招岗位 */}
     <SecLabel T={T}>在招岗位 ({jobs.length})</SecLabel>
     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12,marginBottom:24}}>
       {jobs.length===0?<div style={{gridColumn:"1 / -1"}}><Empty T={T} icon="◈" title="暂无在招岗位" sub="先去岗位管理新建岗位，再开始批量上传简历。"/></div>
@@ -3102,9 +3114,8 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
       })}
     </div>
 
-    {/* 板块3：评分标准 */}
     <SecLabel T={T}>评分标准</SecLabel>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"22px 22px 18px",marginBottom:16,boxShadow:SOFT_SHADOW}}>
+    <div style={{...dashboardShell,padding:"22px 22px 18px",marginBottom:16}}>
       <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:6}}>评分拆解（通用版）</div>
       <div style={{fontSize:12,color:T.text4,lineHeight:1.8,marginBottom:16}}>先看 T0 / T1 / T2 具体考察什么。T0 现在代表“是否具备进入评估池的最低岗位匹配”，再用下面的总分档位判断候选人是合格、待定还是淘汰。</div>
 
@@ -3149,7 +3160,7 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
         {label:"待定",range:"3.0 - 4.4",desc:"保留在观察池，建议补充验证或二次筛选。",color:"#d97706",bg:"#fffbeb"},
         {label:"淘汰",range:"0 - 2.9",desc:"与岗位要求偏差较大，建议结束当前流程。",color:"#dc2626",bg:"#fef2f2"},
       ].map(item=>(
-        <div key={item.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 18px 16px",boxShadow:SOFT_SHADOW}}>
+        <div key={item.label} style={{...dashboardShell,padding:"18px 18px 16px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
             <Chip c={item.color} bg={item.bg} lg>{item.label}</Chip>
             <div style={{fontSize:20,fontWeight:900,color:item.color}}>{item.range}</div>
@@ -3159,16 +3170,14 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
       ))}
     </div>
 
-    {/* 板块4：简历上传 */}
     <SecLabel T={T}>简历上传</SecLabel>
     <DashboardResumeUploader T={T} jobs={jobs} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} task={dashboardUpload} setTask={setDashboardUpload} onStart={startDashboardResumeImport}/>
 
-    {/* 板块5：候选人列表 */}
     <SecLabel T={T}>候选人列表 ({cands.length})</SecLabel>
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,overflow:"hidden",boxShadow:SOFT_SHADOW}}>
+    <div style={{...dashboardShell,overflow:"hidden"}}>
       {rankedCands.length===0?<div style={{padding:"44px 20px",textAlign:"center",color:T.text4,fontSize:13}}>上传简历后，这里会按 AI 首轮匹配度展示候选人。</div>
       :<>
-        <div style={{display:"grid",gridTemplateColumns:"1.7fr 1.3fr 0.85fr 0.9fr 0.95fr",padding:"8px 16px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4}}>
+        <div style={{display:"grid",gridTemplateColumns:"1.7fr 1.3fr 0.85fr 0.9fr 0.95fr",padding:"10px 16px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:800,color:T.text4,background:"#f8fafc"}}>
           <span>候选人</span>
           <span>在招岗位</span>
           <span style={{textAlign:"center"}}>AI 匹配分</span>
@@ -3253,47 +3262,75 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
     if(!files.length){setTask(prev=>({...prev,err:"请先拖入或选择至少一份简历"}));return;}
     onStart?.({files,results});
   };
+  const queuedCount=files.length;
+  const successCount=Object.values(results).filter(item=>item?.status==="success").length;
+  const processingCount=Object.values(results).filter(item=>item?.status==="processing").length;
+  const failedCount=Object.values(results).filter(item=>item?.status==="error").length;
 
   return(
-    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"20px 20px 18px",marginBottom:22}}>
+    <div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"22px 22px 20px",marginBottom:22,boxShadow:SOFT_SHADOW}}>
       <>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:18,fontWeight:800,color:T.text}}>一键上传简历并完成 AI 首轮分析</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:5,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来。系统会先智能识别并完成通用规整与首轮评分，岗位归属如果判断不准，后续再去岗位管理里修改。</div>
-          </div>
-        </div>
-
-        <div style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:12,color:T.text3,lineHeight:1.8,marginBottom:14}}>上传时不需要先选岗位。系统会先按通用标准完成规整和首轮评分，后续如果岗位识别不准确，再去岗位管理里修正即可。</div>
-
-        <div
-          onDragOver={e=>{e.preventDefault();setDrag(true);}}
-          onDragLeave={()=>setDrag(false)}
-          onDrop={e=>{e.preventDefault();setDrag(false);queueFiles(e.dataTransfer.files);}}
-          onClick={()=>!loading&&document.getElementById("dashboard-resume-upload-input")?.click()}
-          style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:16,minHeight:220,padding:"26px 24px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",background:drag?`${T.accent}10`:T.card2,cursor:loading?"default":"pointer",transition:"all 0.15s"}}>
-          <input id="dashboard-resume-upload-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" multiple style={{display:"none"}} onChange={e=>{queueFiles(e.target.files);e.target.value="";}}/>
-          {loading
-            ?<div>
-              <Spin text="正在识别简历并生成首轮评分..." />
-              <div style={{fontSize:12,color:T.text4,marginTop:8}}>任务已转入后台。你现在切换到其他窗口也不会中断，回来后会自动保留进度和结果。</div>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0, 1.45fr) minmax(280px, 0.75fr)",gap:16,alignItems:"stretch",marginBottom:16}}>
+          <div style={{display:"grid",gap:14}}>
+            <div>
+              <div style={{fontSize:20,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>一键上传简历并完成 AI 首轮分析</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8}}>直接把 PDF、图片、Word 或纯文本简历拖进来。系统会先完成通用规整与首轮评分，岗位归属如果判断不准，后续再去岗位管理里修正。</div>
             </div>
-            :<>
-              <div style={{fontSize:36,lineHeight:1,marginBottom:12}}>⇪</div>
-              <div style={{fontSize:19,fontWeight:800,color:T.text}}>把简历拖到这里，或点击选择文件</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>支持多份同时导入。当前会直接做通用初筛，后续可在岗位管理里再修正岗位归属。</div>
-            </>}
-        </div>
-
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:14,flexWrap:"wrap"}}>
-          <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>
-            {files.length?`已加入 ${files.length} 份待处理简历，可继续拖入补充。`:"还没有加入简历文件。"}
+            <div style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12,fontSize:12,color:T.text3,lineHeight:1.8}}>上传时不需要先选岗位。系统会先按通用标准完成规整和首轮评分，后续如果岗位识别不准确，再去岗位管理里修正即可。</div>
+            <div
+              onDragOver={e=>{e.preventDefault();setDrag(true);}}
+              onDragLeave={()=>setDrag(false)}
+              onDrop={e=>{e.preventDefault();setDrag(false);queueFiles(e.dataTransfer.files);}}
+              onClick={()=>!loading&&document.getElementById("dashboard-resume-upload-input")?.click()}
+              style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:18,minHeight:230,padding:"30px 28px",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center",background:drag?`${T.accent}10`:"#fbfcfe",cursor:loading?"default":"pointer",transition:"all 0.15s"}}
+            >
+              <input id="dashboard-resume-upload-input" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" multiple style={{display:"none"}} onChange={e=>{queueFiles(e.target.files);e.target.value="";}}/>
+              {loading
+                ?<div>
+                  <Spin text="正在识别简历并生成首轮评分..." />
+                  <div style={{fontSize:12,color:T.text4,marginTop:8,lineHeight:1.8}}>任务已转入后台。你现在切换到其他窗口也不会中断，回来后会自动保留进度和结果。</div>
+                </div>
+                :<>
+                  <div style={{fontSize:40,lineHeight:1,marginBottom:14}}>⇪</div>
+                  <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>把简历拖到这里</div>
+                  <div style={{fontSize:13,color:T.text3,marginTop:8,lineHeight:1.8}}>或者点击选择文件，支持多份同时导入。当前会直接做通用初筛，后续可在岗位管理里再修正岗位归属。</div>
+                </>}
+            </div>
           </div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            {files.length>0&&<button onClick={()=>setTask(prev=>({...prev,files:[],err:"",info:"",results:{}}))} style={{padding:"9px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:8,fontSize:12,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
-            <button onClick={submit} disabled={loading||!files.length} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,fontSize:13,fontWeight:800,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
-              {loading?"正在批量分析...":"开始识别并导入"}
-            </button>
+          <div style={{display:"grid",gap:12}}>
+            <div style={{padding:"16px 16px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:18,boxShadow:"0 12px 28px rgba(15,23,42,0.05)"}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>导入概览</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div style={{padding:"10px 12px",borderRadius:12,background:"#f8fafc",border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>队列总数</div>
+                  <div style={{fontSize:24,fontWeight:900,color:T.text,marginTop:8,lineHeight:1}}>{queuedCount}</div>
+                </div>
+                <div style={{padding:"10px 12px",borderRadius:12,background:"#ecfdf5",border:"1px solid #bbf7d0"}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#059669",letterSpacing:"0.08em"}}>已导入</div>
+                  <div style={{fontSize:24,fontWeight:900,color:"#059669",marginTop:8,lineHeight:1}}>{successCount}</div>
+                </div>
+                <div style={{padding:"10px 12px",borderRadius:12,background:"#f5f3ff",border:"1px solid #ddd6fe"}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#7c3aed",letterSpacing:"0.08em"}}>处理中</div>
+                  <div style={{fontSize:24,fontWeight:900,color:"#7c3aed",marginTop:8,lineHeight:1}}>{processingCount}</div>
+                </div>
+                <div style={{padding:"10px 12px",borderRadius:12,background:"#fff5f5",border:"1px solid #fecaca"}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#dc2626",letterSpacing:"0.08em"}}>失败</div>
+                  <div style={{fontSize:24,fontWeight:900,color:"#dc2626",marginTop:8,lineHeight:1}}>{failedCount}</div>
+                </div>
+              </div>
+            </div>
+            <div style={{padding:"16px 16px 14px",background:"linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",border:`1px solid ${T.border}`,borderRadius:18}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>操作台</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginBottom:12}}>
+                {files.length?`已加入 ${files.length} 份待处理简历，可继续拖入补充。`:"还没有加入简历文件。"}
+              </div>
+              <div style={{display:"grid",gap:10}}>
+                {files.length>0&&<button onClick={()=>setTask(prev=>({...prev,files:[],err:"",info:"",results:{}}))} style={{padding:"10px 14px",border:`1px solid ${T.border2}`,background:T.surface,color:T.text3,borderRadius:12,fontSize:12,fontWeight:800,cursor:loading?"not-allowed":"pointer",opacity:loading?0.5:1}}>清空列表</button>}
+                <button onClick={submit} disabled={loading||!files.length} style={{padding:"12px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:12,fontSize:13,fontWeight:900,cursor:loading||!files.length?"not-allowed":"pointer",opacity:loading||!files.length?0.55:1}}>
+                  {loading?"正在批量分析...":"开始识别并导入"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -3308,7 +3345,7 @@ function DashboardResumeUploader({T,jobs,cfg,recordTokens,dirCtx,task,setTask,on
               : result.status==="processing"
               ? {c:"#7c3aed",bg:"#f5f3ff",label:"处理中"}
               : {c:T.text3,bg:T.card2,label:"待导入"};
-            return(<div key={key} style={{padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            return(<div key={key} style={{padding:"12px 12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,boxShadow:"0 10px 24px rgba(15,23,42,0.04)"}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:12,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
                 <div style={{fontSize:11,color:T.text4,marginTop:3}}>{(file.size/1024/1024).toFixed(2)} MB</div>
