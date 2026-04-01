@@ -9,11 +9,33 @@ const CREATE_STATE_TABLE_SQL = `
     updated_at TEXT NOT NULL
   )
 `;
+const CREATE_PREVIEW_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS hr_resume_previews (
+    candidate_id TEXT PRIMARY KEY,
+    preview_payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )
+`;
 const SELECT_STATE_SQL = `
   SELECT payload, schema_version, updated_at
   FROM hr_state
   WHERE state_key = ?
   LIMIT 1
+`;
+const SELECT_PREVIEWS_SQL = `
+  SELECT candidate_id, preview_payload, updated_at
+  FROM hr_resume_previews
+`;
+const UPSERT_PREVIEW_SQL = `
+  INSERT INTO hr_resume_previews (candidate_id, preview_payload, updated_at)
+  VALUES (?1, ?2, ?3)
+  ON CONFLICT(candidate_id) DO UPDATE SET
+    preview_payload = excluded.preview_payload,
+    updated_at = excluded.updated_at
+`;
+const DELETE_PREVIEW_SQL = `
+  DELETE FROM hr_resume_previews
+  WHERE candidate_id = ?
 `;
 const UPSERT_STATE_SQL = `
   INSERT INTO hr_state (state_key, payload, schema_version, created_at, updated_at)
@@ -36,6 +58,7 @@ function json(payload, status = 200) {
 
 async function ensureStateTable(db) {
   await db.prepare(CREATE_STATE_TABLE_SQL).run();
+  await db.prepare(CREATE_PREVIEW_TABLE_SQL).run();
 }
 
 function verifyToken(request, env) {
@@ -103,9 +126,41 @@ function pickRicherValue(preferred, fallback) {
   return preferred;
 }
 
-function sanitizeCandidateForCloud(candidate) {
+function previewPagesCount(preview) {
+  if (!preview?.src) return 0;
+  return Array.isArray(preview.pages) && preview.pages.length ? preview.pages.length : 1;
+}
+
+function previewWeight(preview) {
+  if (!preview?.src) return 0;
+  let score = 1;
+  if (preview.kind === "pdf") score += Math.min(previewPagesCount(preview), 8);
+  if (preview.previewMode === "full") score += 12;
+  else if (preview.previewMode === "light") score += 5;
+  else if (preview.previewMode === "cloud") score += 2;
+  return score;
+}
+
+function pickPreferredResumePreview(primary, fallback) {
+  if (!primary?.src) return fallback || null;
+  if (!fallback?.src) return primary || null;
+  return previewWeight(primary) >= previewWeight(fallback) ? primary : fallback;
+}
+
+function stripCandidatePreview(candidate) {
   if (!candidate || typeof candidate !== "object") return candidate;
-  return { ...candidate, resumePreview: null };
+  const { resumePreview, resumePreviewCloud, ...rest } = candidate;
+  return rest;
+}
+
+function extractPreviewEntries(cands = []) {
+  return (Array.isArray(cands) ? cands : [])
+    .filter(candidate => String(candidate?.id || "").trim() && candidate?.resumePreview?.src)
+    .map(candidate => ({
+      candidateId: String(candidate.id).trim(),
+      payload: JSON.stringify(candidate.resumePreview),
+      updatedAt: candidate.updatedAt || new Date().toISOString(),
+    }));
 }
 
 function mergeCandidateRecord(left, right) {
@@ -115,7 +170,7 @@ function mergeCandidateRecord(left, right) {
   const manualStatusRecord = [left, right]
     .filter(item => item?.statusSource === "manual" && item?.status)
     .sort((a, b) => entityTime(b) - entityTime(a))[0];
-  return sanitizeCandidateForCloud({
+  return {
     ...older,
     ...newer,
     name: pickRicherValue(newer?.name, older?.name),
@@ -125,6 +180,7 @@ function mergeCandidateRecord(left, right) {
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
+    resumePreview: pickPreferredResumePreview(newer?.resumePreview, older?.resumePreview),
     screening: pickRicherValue(newer?.screening, older?.screening),
     questions: pickRicherValue(newer?.questions, older?.questions) || null,
     interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
@@ -132,7 +188,7 @@ function mergeCandidateRecord(left, right) {
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
     directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
     updatedAt: (mergedTime ? new Date(mergedTime) : new Date()).toISOString(),
-  });
+  };
 }
 
 function mergeJobsById(localJobs = [], remoteJobs = []) {
@@ -159,7 +215,7 @@ function mergeCandidates(localCands = [], remoteCands = []) {
       : signature
         ? `sig:${signature}`
         : `name:${normalizeDuplicateField(candidate.name)}|file:${normalizeDuplicateField(candidate.resumeFileName)}`;
-    const enriched = sanitizeCandidateForCloud(signature ? { ...candidate, resumeSignature: signature } : candidate);
+    const enriched = signature ? { ...candidate, resumeSignature: signature } : candidate;
     const existing = map.get(key);
     if (!existing) {
       map.set(key, enriched);
@@ -212,8 +268,29 @@ async function readState(db) {
   } catch {
     parsed = null;
   }
+  const previewRows = await db.prepare(SELECT_PREVIEWS_SQL).all().catch(() => ({ results: [] }));
+  const previewMap = new Map(
+    ((previewRows && Array.isArray(previewRows.results)) ? previewRows.results : [])
+      .map(item => {
+        try {
+          return [String(item.candidate_id || "").trim(), JSON.parse(item.preview_payload)];
+        } catch {
+          return [String(item.candidate_id || "").trim(), null];
+        }
+      })
+      .filter(([candidateId, preview]) => candidateId && preview?.src)
+  );
+  const stateWithPreviews = parsed && typeof parsed === "object"
+    ? {
+        ...parsed,
+        cands: (Array.isArray(parsed.cands) ? parsed.cands : []).map(candidate => {
+          const preview = previewMap.get(String(candidate?.id || "").trim());
+          return preview ? { ...candidate, resumePreview: pickPreferredResumePreview(candidate?.resumePreview, preview) } : candidate;
+        }),
+      }
+    : parsed;
   return {
-    state: parsed,
+    state: stateWithPreviews,
     updatedAt: row.updated_at || "",
     schemaVersion: row.schema_version || SCHEMA_VERSION,
   };
@@ -253,15 +330,33 @@ export async function onRequest(context) {
     try {
       const existing = await readState(env.DB);
       const merged = mergeStatePayloads(normalized, normalizeStatePayload(existing?.state || {}));
+      const previewEntries = extractPreviewEntries(merged.cands);
+      const previewIdSet = new Set(previewEntries.map(entry => entry.candidateId));
+      const strippedMerged = {
+        ...merged,
+        cands: (merged.cands || []).map(stripCandidatePreview),
+      };
       await env.DB.prepare(UPSERT_STATE_SQL)
         .bind(
           STATE_KEY,
-          JSON.stringify(merged),
-          merged.schemaVersion || SCHEMA_VERSION,
+          JSON.stringify(strippedMerged),
+          strippedMerged.schemaVersion || SCHEMA_VERSION,
           now,
           now
         )
         .run();
+      const previewRows = await env.DB.prepare(SELECT_PREVIEWS_SQL).all().catch(() => ({ results: [] }));
+      const existingPreviewIds = ((previewRows && Array.isArray(previewRows.results)) ? previewRows.results : [])
+        .map(item => String(item.candidate_id || "").trim())
+        .filter(Boolean);
+      for (const previewId of existingPreviewIds) {
+        if (!previewIdSet.has(previewId)) {
+          await env.DB.prepare(DELETE_PREVIEW_SQL).bind(previewId).run();
+        }
+      }
+      for (const entry of previewEntries) {
+        await env.DB.prepare(UPSERT_PREVIEW_SQL).bind(entry.candidateId, entry.payload, entry.updatedAt).run();
+      }
       return json({ ok: true, updatedAt: now, state: merged });
     } catch (error) {
       return json({ error: error?.message || "保存云端状态失败" }, 500);

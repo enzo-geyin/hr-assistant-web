@@ -50,11 +50,46 @@ const filterDeletedCandidates = (cands = [], deletedCandidateIds = []) => {
   return (Array.isArray(cands) ? cands : []).filter(candidate => !deletedSet.has(String(candidate?.id || "").trim()));
 };
 
+const previewPagesCount = preview => {
+  if (!preview?.src) return 0;
+  return Array.isArray(preview.pages) && preview.pages.length ? preview.pages.length : 1;
+};
+
+const previewWeight = preview => {
+  if (!preview?.src) return 0;
+  let score = 1;
+  if (preview.kind === "pdf") score += Math.min(previewPagesCount(preview), 8);
+  if (preview.previewMode === "full") score += 12;
+  else if (preview.previewMode === "light") score += 5;
+  else if (preview.previewMode === "cloud") score += 2;
+  return score;
+};
+
+const pickPreferredResumePreview = (primary, fallback) => {
+  if (!primary?.src) return fallback || null;
+  if (!fallback?.src) return primary || null;
+  return previewWeight(primary) >= previewWeight(fallback) ? primary : fallback;
+};
+
+const buildCloudSafeResumePreview = candidate => {
+  const preview = candidate?.resumePreviewCloud || (candidate?.resumePreview?.previewMode === "light" ? candidate.resumePreview : null);
+  if (!preview?.src) return null;
+  return {
+    kind: preview.kind || "image",
+    src: preview.src,
+    pages: Array.isArray(preview.pages) && preview.pages.length ? [preview.pages[0]] : [preview.src],
+    name: preview.name || candidate?.resumeFileName || "",
+    pageCount: Number(preview.pageCount) || previewPagesCount(preview) || 1,
+    previewMode: "cloud",
+  };
+};
+
 const sanitizeCandidateForCloud = candidate => {
   if (!candidate || typeof candidate !== "object") return candidate;
+  const { resumePreviewCloud, ...rest } = candidate;
   return {
-    ...candidate,
-    resumePreview: null,
+    ...rest,
+    resumePreview: buildCloudSafeResumePreview(candidate),
   };
 };
 
@@ -106,7 +141,8 @@ const mergeCandidateRecord = (left, right) => {
     resume: pickRicherValue(newer?.resume, older?.resume),
     resumeSignature: pickRicherValue(newer?.resumeSignature, older?.resumeSignature || buildResumeSignature(newer?.resume || older?.resume || "")),
     resumeFileName: pickRicherValue(newer?.resumeFileName, older?.resumeFileName),
-    resumePreview: pickRicherValue(newer?.resumePreview, older?.resumePreview),
+    resumePreview: pickPreferredResumePreview(newer?.resumePreview, older?.resumePreview),
+    resumePreviewCloud: pickPreferredResumePreview(newer?.resumePreviewCloud, older?.resumePreviewCloud),
     screening: pickRicherValue(newer?.screening, older?.screening),
     questions: pickRicherValue(newer?.questions, older?.questions) || null,
     interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
@@ -1917,15 +1953,44 @@ const fileToDataUrl = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
+const dataUrlToImage = dataUrl => new Promise((resolve, reject) => {
+  const image = new Image();
+  image.onload = () => resolve(image);
+  image.onerror = () => reject(new Error("图片预览处理失败"));
+  image.src = dataUrl;
+});
+
+const compressImageDataUrl = async (dataUrl, { maxWidth = 900, maxHeight = 1280, quality = 0.72 } = {}) => {
+  const image = await dataUrlToImage(dataUrl);
+  const width = image.naturalWidth || image.width || 0;
+  const height = image.naturalHeight || image.height || 0;
+  if (!width || !height) return dataUrl;
+  const ratio = Math.min(1, maxWidth / width, maxHeight / height);
+  if (ratio >= 1 && dataUrl.length <= 180000) return dataUrl;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * ratio));
+  canvas.height = Math.max(1, Math.round(height * ratio));
+  const context = canvas.getContext("2d");
+  if (!context) return dataUrl;
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", quality);
+};
+
 const createResumeVisualPreview = async (file, options = {}) => {
   const {
     maxPages = Number.POSITIVE_INFINITY,
     scale = 1.35,
     imageQuality = 0.92,
+    forceImageCompression = false,
+    imageMaxWidth = 1100,
+    imageMaxHeight = 1500,
   } = options || {};
   const kind = getFileKind(file);
   if (kind === "image") {
-    const src = await fileToDataUrl(file);
+    const rawSrc = await fileToDataUrl(file);
+    const src = forceImageCompression
+      ? await compressImageDataUrl(rawSrc, { maxWidth: imageMaxWidth, maxHeight: imageMaxHeight, quality: imageQuality })
+      : rawSrc;
     return {
       kind: "image",
       src,
@@ -1954,6 +2019,22 @@ const createResumeVisualPreview = async (file, options = {}) => {
       pageCount: pdf.numPages,
       previewMode: renderCount >= pdf.numPages ? "full" : "light",
     };
+  }
+  return null;
+};
+
+const createCloudResumePreview = async file => {
+  const kind = getFileKind(file);
+  if (kind === "pdf") {
+    return createResumeVisualPreview(file, { maxPages: 1, scale: 0.72, imageQuality: 0.62 });
+  }
+  if (kind === "image") {
+    return createResumeVisualPreview(file, {
+      imageQuality: 0.7,
+      forceImageCompression: true,
+      imageMaxWidth: 900,
+      imageMaxHeight: 1280,
+    });
   }
   return null;
 };
@@ -2160,6 +2241,7 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
           : {}
       ).catch(() => null)
     : null;
+  const resumePreviewCloud = await createCloudResumePreview(file).catch(() => null);
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
@@ -2178,6 +2260,7 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
     resumeSignature,
     resumeFileName: file.name,
     resumePreview,
+    resumePreviewCloud,
     resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
     screening,
     ...resolveScreeningStatusPatch(candidate, screening.overallScore),
@@ -2199,6 +2282,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
           : {}
       ).catch(() => null)
     : null;
+  const resumePreviewCloud = await createCloudResumePreview(file).catch(() => null);
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
@@ -2221,6 +2305,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       resumeSignature,
       resumeFileName: file.name,
       resumePreview,
+      resumePreviewCloud,
       resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
       screening,
       questions: null,
@@ -2343,7 +2428,7 @@ export default function App() {
   const [cloudHydrated,setCloudHydrated]=useState(false);
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
   const [deletedCandidateIds,setDeletedCandidateIds]=useState(()=>load("hr_deleted_cands",[]));
-  const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:""});
+  const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:"",dirtyCandidateState:false});
 
   useEffect(()=>save("hr_cfg",cfg),[cfg]);
   useEffect(()=>save("hr_jobs",jobs),[jobs]);
@@ -2351,7 +2436,15 @@ export default function App() {
   useEffect(()=>save("hr_usage",usageLogs),[usageLogs]);
   useEffect(()=>save("hr_deleted_cands",deletedCandidateIds),[deletedCandidateIds]);
   useEffect(()=>{
-    latestCloudStateRef.current={cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:cloud.updatedAt||""};
+    latestCloudStateRef.current={
+      ...latestCloudStateRef.current,
+      cfg,
+      jobs,
+      cands,
+      usageLogs,
+      deletedCandidateIds,
+      cloudUpdatedAt:cloud.updatedAt||latestCloudStateRef.current.cloudUpdatedAt||"",
+    };
   },[cfg,jobs,cands,usageLogs,deletedCandidateIds,cloud.updatedAt]);
 
   const reloadModelStatus=async()=>{
@@ -2394,7 +2487,7 @@ export default function App() {
       const current=latestCloudStateRef.current;
       const lastCloudTs=current.cloudUpdatedAt?new Date(current.cloudUpdatedAt).getTime():0;
       const hasLocalUnsyncedChanges=!initial && getLatestStateEntityTime(current)>lastCloudTs;
-      if(hasLocalUnsyncedChanges) return;
+      if(hasLocalUnsyncedChanges || (!initial && current.dirtyCandidateState)) return;
       if(initial){
         setCloudHydrated(false);
         setCloud(prev=>({...prev,phase:"loading",message:"正在连接云端数据库..."}));
@@ -2414,9 +2507,9 @@ export default function App() {
           const hasRemoteChanges=mergedComparable!==localComparable;
           if(hasRemoteChanges){
             setJobs(merged.jobs);
-            setCandsSynced(merged.cands);
+            setCandsSynced(merged.cands,{markDirty:false});
             setUsageLogs(merged.usageLogs);
-            setDeletedCandidateIds(merged.deletedCandidateIds||[]);
+            setDeletedCandidateIdsSynced(merged.deletedCandidateIds||[],{markDirty:false});
             setCfg(prev=>{
               const next=normalizeCfg({...prev,...merged.cfg,apiKeys:prev.apiKeys,proxyToken:prev.proxyToken});
               return JSON.stringify(pickCloudCfg(next))===JSON.stringify(pickCloudCfg(prev))?prev:next;
@@ -2468,6 +2561,7 @@ export default function App() {
         setCloud(prev=>({...prev,phase:"syncing",message:"正在同步到云端数据库..."}));
         const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
         if(cancelled) return;
+        latestCloudStateRef.current={...latestCloudStateRef.current,cloudUpdatedAt:payload.updatedAt||"",dirtyCandidateState:false};
         setCloud({phase:"ready",message:"云端数据库已同步",updatedAt:payload.updatedAt||""});
       }catch(error){
         if(cancelled) return;
@@ -2479,11 +2573,20 @@ export default function App() {
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
-  const setCandsSynced = updater => setCands(prev=>{
+  const setCandsSynced = (updater, options={}) => setCands(prev=>{
+    const { markDirty = true } = options || {};
     const next = typeof updater === "function" ? updater(prev) : updater;
-    latestCloudStateRef.current={...latestCloudStateRef.current,cands:next};
+    latestCloudStateRef.current={...latestCloudStateRef.current,cands:next,dirtyCandidateState:markDirty?true:latestCloudStateRef.current.dirtyCandidateState};
     return next;
   });
+  const setDeletedCandidateIdsSynced = (updater, options={}) => {
+    const { markDirty = true } = options || {};
+    setDeletedCandidateIds(prev=>{
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      latestCloudStateRef.current={...latestCloudStateRef.current,deletedCandidateIds:next,dirtyCandidateState:markDirty?true:latestCloudStateRef.current.dirtyCandidateState};
+      return next;
+    });
+  };
   const updCand=(id,patch)=>setCandsSynced(p=>{
     const next=p.map(c=>c.id===id?{...c,...patch,updatedAt:new Date().toISOString()}:c);
     return next;
@@ -2493,7 +2596,8 @@ export default function App() {
     updCand(candidateId,{resumePreviewStatus:"generating"});
     try{
       const fullPreview=await createResumeVisualPreview(file);
-      updCand(candidateId,{resumePreview:fullPreview,resumePreviewStatus:fullPreview?.src?"ready":"none"});
+      const cloudPreview=await createCloudResumePreview(file).catch(()=>null);
+      updCand(candidateId,{resumePreview:fullPreview,resumePreviewCloud:cloudPreview||undefined,resumePreviewStatus:fullPreview?.src?"ready":"none"});
     }catch{
       updCand(candidateId,{resumePreviewStatus:"failed"});
     }
@@ -2528,9 +2632,8 @@ export default function App() {
       const next=prev.filter(c=>String(c.id||"").trim()!==deletedId);
       return next;
     });
-    setDeletedCandidateIds(prev=>{
+    setDeletedCandidateIdsSynced(prev=>{
       const next=mergeDeletedIds(prev,[deletedId]);
-      latestCloudStateRef.current={...latestCloudStateRef.current,deletedCandidateIds:next};
       return next;
     });
     setCompared(prev=>prev.filter(id=>id!==cid));
@@ -3996,6 +4099,11 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const currentStatusMeta=STATUS[cand.status]||STATUS.pending;
   const previewTitle=visualPreview?.src?"简历版式预览":"简历识别文本";
   const accentRole = job?.title || cand.screening?.roleDirection || "未绑定岗位";
+  const overviewFacts = [
+    { label: "简历来源", value: cand.resumeFileName || "手动录入 / 识别文本", tone: "#111827" },
+    { label: "岗位模板", value: accentRole, tone: "#2563eb" },
+    { label: "下一动作", value: cand.scheduledAt ? `${currentStatusMeta?.label || "待处理"} · ${fmtDate(cand.scheduledAt)}` : (currentStatusMeta?.label || "待处理"), tone: currentStatusMeta?.c || T.text },
+  ];
   const shellCard={
     background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
     border:`1px solid ${T.border}`,
@@ -4096,10 +4204,19 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         {cand.resumePreviewStatus==="generating"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8"}}>完整预览后台补全中</span>}
         {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
       </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12,marginTop:18}}>
+        {overviewFacts.map(fact=>(
+          <div key={fact.label} style={{padding:"12px 14px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</div>
+            <div style={{fontSize:14,fontWeight:800,color:fact.tone||T.text,lineHeight:1.6,marginTop:8,wordBreak:"break-word"}}>{fact.value}</div>
+          </div>
+        ))}
+      </div>
     </div>
 
-    <div style={{display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap",marginBottom:16}}>
-      {previewResume&&<div style={{...minorPanel,flex:"1 1 760px",padding:"18px 20px",minWidth:0}}>
+    <div style={{display:"grid",gap:16,marginBottom:16}}>
+      {previewResume&&<div style={{...minorPanel,padding:"18px 20px",minWidth:0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{previewTitle}</div>
@@ -4174,8 +4291,8 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         )}
       </div>}
 
-      <div style={{flex:"0 0 320px",width:"min(100%, 360px)",display:"grid",gap:12,position:"sticky",top:18}}>
-        <div style={{...minorPanel,padding:"16px 16px 14px"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))",gap:16}}>
+        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
           <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
           <div style={{display:"grid",gap:12}}>
             <div>
@@ -4196,7 +4313,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
           <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
         </div>
 
-        <div style={{...minorPanel,padding:"16px 16px 14px"}}>
+        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
           <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
           <div style={{display:"grid",gap:10}}>
             <input
@@ -4301,9 +4418,10 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
       setErr("");setLoading(true);
       try{
         const resumePreview = await createResumeVisualPreview(resumeFile).catch(() => null);
+        const resumePreviewCloud = await createCloudResumePreview(resumeFile).catch(() => null);
         const extractedResume = await extractFileText(resumeFile);
         await analyzeExtractedResume(extractedResume,resumeFile.name);
-        updCand(cand.id,{resumePreview});
+        updCand(cand.id,{resumePreview,resumePreviewCloud});
       }catch(e){setErr(e.message);}
       setLoading(false);
       return;
