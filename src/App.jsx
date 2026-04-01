@@ -3570,6 +3570,20 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
   const cand=cands.find(c=>c.id===selCand);
   const job=getEffectiveCandidateJob(jobs,cand);
   const [showImport,setShowImport]=useState(false);
+  const candidateShell={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:CARD_RADIUS,
+    boxShadow:SOFT_SHADOW,
+  };
+  const railPanel={
+    ...candidateShell,
+    overflow:"hidden",
+  };
+  const totalCandidates=cands.length;
+  const interviewCount=cands.filter(item=>item.status==="interview").length;
+  const passedCount=cands.filter(item=>item.status==="screened").length;
+  const failedCount=cands.filter(item=>item.status==="rejected").length;
   const deleteCandidate=candidate=>{
     if(!candidate) return;
     const ok=window.confirm(`确认删除候选人「${candidate.name||"未命名候选人"}」吗？\n\n这会同时删除该简历的筛选结果、面试记录、总监判断和相关反馈，并同步到云端。`);
@@ -3621,58 +3635,116 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
   };
   return(<Page T={T} title="候选人" sub="管理所有候选人及评估进度">
     {showImport&&<ResumeImportModal T={T} jobs={jobs} cands={cands} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} onClose={()=>setShowImport(false)} onCreated={onCreated} onOpenCandidate={openCandidateForResumeUpdate} onReplaceExisting={replaceCandidateResume}/>}
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>在候选人库里直接上传简历，系统会自动识别文字、规整简历，并按所选岗位完成初筛。</div>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        {cand&&<button onClick={()=>deleteCandidate(cand)} style={{padding:"9px 16px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>删除当前候选人</button>}
-        <button onClick={()=>setShowImport(true)} style={{padding:"9px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>+ 上传简历</button>
+    <div style={{...candidateShell,padding:"18px 20px",marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:18,flexWrap:"wrap"}}>
+        <div style={{flex:"1 1 460px",minWidth:0}}>
+          <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>候选人工作台</div>
+          <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>左侧保持候选人轨道，右侧专注单人工作区。你可以连续搜索、切换、推进每一位候选人的筛选、面试与最终判断。</div>
+        </div>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+          {cand&&<button onClick={()=>deleteCandidate(cand)} style={{padding:"10px 15px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap"}}>删除当前候选人</button>}
+          <button onClick={()=>setShowImport(true)} style={{padding:"10px 16px",background:T.accent,color:T.accentFg,border:"none",borderRadius:12,fontSize:12,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 14px 24px rgba(15,23,42,0.12)"}}>+ 上传简历</button>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:10,marginTop:18}}>
+        <div style={{padding:"10px 12px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.08em",color:T.text4}}>总候选人</div>
+          <div style={{fontSize:22,fontWeight:900,color:T.text,lineHeight:1,marginTop:8}}>{totalCandidates}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:14,background:"#ecfdf5",border:"1px solid #bbf7d0"}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.08em",color:"#059669"}}>简历通过</div>
+          <div style={{fontSize:22,fontWeight:900,color:"#059669",lineHeight:1,marginTop:8}}>{passedCount}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:14,background:"#f5f3ff",border:"1px solid #ddd6fe"}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.08em",color:"#7c3aed"}}>进入面试</div>
+          <div style={{fontSize:22,fontWeight:900,color:"#7c3aed",lineHeight:1,marginTop:8}}>{interviewCount}</div>
+        </div>
+        <div style={{padding:"10px 12px",borderRadius:14,background:"#fff5f5",border:"1px solid #fecaca"}}>
+          <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.08em",color:"#dc2626"}}>未通过</div>
+          <div style={{fontSize:22,fontWeight:900,color:"#dc2626",lineHeight:1,marginTop:8}}>{failedCount}</div>
+        </div>
       </div>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"256px 1fr",gap:20}}>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"11px 14px",borderBottom:`1px solid ${T.border}`,fontSize:13,fontWeight:700,color:T.text}}>全部候选人 ({cands.length})</div>
-        <div style={{padding:"10px 12px",borderBottom:`1px solid ${T.border}`,background:T.card2}}>
-          <input
-            value={searchText}
-            onChange={e=>setSearchText(e.target.value)}
-            placeholder="搜索姓名、岗位、文件名..."
-            style={{...inSt(T),marginBottom:0,fontSize:12,padding:"9px 11px"}}
-          />
-          {!!searchText.trim()&&<div style={{fontSize:10,color:T.text4,marginTop:6}}>当前匹配 {filteredCands.length} 位候选人</div>}
+    <div style={{display:"grid",gridTemplateColumns:"minmax(296px, 336px) minmax(0, 1fr)",gap:18,alignItems:"start"}}>
+      <div style={railPanel}>
+        <div style={{padding:"18px 18px 14px",borderBottom:`1px solid ${T.border}`,background:"linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:10}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,letterSpacing:"0.08em",color:T.text4}}>候选人轨道</div>
+              <div style={{fontSize:20,fontWeight:900,color:T.text,letterSpacing:"-0.03em",marginTop:6}}>全部候选人</div>
+            </div>
+            <div style={{fontSize:12,color:T.text4,fontWeight:700}}>{filteredCands.length} / {totalCandidates}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:14}}>
+            <div style={{padding:"10px 12px",borderRadius:12,background:"#ffffff",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>对比中</div>
+              <div style={{fontSize:18,fontWeight:900,color:T.text,marginTop:6}}>{compared.length}</div>
+            </div>
+            <div style={{padding:"10px 12px",borderRadius:12,background:"#ffffff",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>观察中</div>
+              <div style={{fontSize:18,fontWeight:900,color:"#ca8a04",marginTop:6}}>{cands.filter(item=>item.status==="pending").length}</div>
+            </div>
+          </div>
+          <div style={{position:"relative",marginTop:14}}>
+            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:T.text4,pointerEvents:"none"}}>⌕</span>
+            <input
+              value={searchText}
+              onChange={e=>setSearchText(e.target.value)}
+              placeholder="搜索姓名、岗位、文件名..."
+              style={{...inSt(T),marginBottom:0,fontSize:12,padding:"10px 12px 10px 34px",background:"#ffffff"}}
+            />
+          </div>
+          <div style={{fontSize:10,color:T.text4,marginTop:8,lineHeight:1.6}}>
+            {!!searchText.trim()?`当前命中 ${filteredCands.length} 位候选人`:"候选人会按上传顺序与最近活动自动排序"}
+          </div>
         </div>
-        <div style={{overflowY:"auto",maxHeight:"calc(100vh - 160px)"}}>
-          {filteredCands.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>{searchText.trim()?"没有匹配到候选人":"暂无候选人"}</div>
+        <div style={{overflowY:"auto",maxHeight:"calc(100vh - 208px)",padding:"10px 10px 12px"}}>
+          {filteredCands.length===0?<div style={{padding:"40px 16px",textAlign:"center",color:T.text4,fontSize:13,lineHeight:1.8}}>{searchText.trim()?"没有匹配到候选人":"暂无候选人，先上传一份简历试试"}</div>
           :filteredCands.map(c=>{
             const boundJob=jobs.find(j=>j.id===c.jobId);
             const effectiveJob=getEffectiveCandidateJob(jobs,c);
             const isCmp=compared.includes(c.id);
-            return(<div key={c.id} style={{padding:"10px 12px",borderBottom:`1px solid ${T.border}`,background:selCand===c.id?T.navActive:"transparent",borderLeft:selCand===c.id?`3px solid ${T.accent}`:"3px solid transparent",cursor:"pointer",transition:"all 0.1s"}} onClick={()=>setSelCand(c.id)}>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <div onClick={e=>{e.stopPropagation();toggleCompare(c.id);}}
-                  style={{width:16,height:16,border:`1.5px solid ${isCmp?T.accent:T.border2}`,borderRadius:4,background:isCmp?T.accent:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all 0.1s"}}>
+            const selected=selCand===c.id;
+            return(<div key={c.id}
+              style={{padding:"12px 12px 12px 13px",marginBottom:8,borderRadius:16,background:selected?"#f8fbff":"#ffffff",border:selected?"1px solid #bfdbfe":`1px solid ${T.border}`,boxShadow:selected?"0 12px 28px rgba(37,99,235,0.08)":"0 6px 14px rgba(15,23,42,0.04)",cursor:"pointer",transition:"all 0.16s",position:"relative"}}
+              onClick={()=>setSelCand(c.id)}>
+              <div style={{position:"absolute",left:0,top:12,bottom:12,width:3,borderRadius:99,background:selected?T.accent:"transparent"}} />
+              <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                <button
+                  onClick={e=>{e.stopPropagation();toggleCompare(c.id);}}
+                  style={{width:18,height:18,border:`1.5px solid ${isCmp?T.accent:T.border2}`,borderRadius:5,background:isCmp?T.accent:"transparent",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",marginTop:7}}
+                >
                   {isCmp&&<span style={{color:T.accentFg,fontSize:10,fontWeight:900}}>✓</span>}
-                </div>
-                <Av name={c.name} T={T} size={30}/>
+                </button>
+                <Av name={c.name} T={T} size={34}/>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:13,fontWeight:600,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
-                  <div style={{fontSize:11,color:T.text4,marginTop:1}}>{effectiveJob?.title||c.screening?.roleDirection||"未绑定岗位"}</div>
-                  {!boundJob&&effectiveJob&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI已识别岗位</div>}
-                  {!effectiveJob&&c.screening?.matchedJobTitle&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</div>}
-                  {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",marginTop:2,fontWeight:700}}>面试评估后台运行中</div>}
-                  {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",marginTop:2,fontWeight:700}}>面试题后台生成中</div>}
-                </div>
-                <div style={{textAlign:"right",flexShrink:0}}>
-                  <SBadge status={c.status}/>
-                  {c.screening&&<div style={{fontSize:12,fontWeight:700,color:scColor(c.screening.overallScore),marginTop:2}}>{c.screening.overallScore?.toFixed(1)}</div>}
+                  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"未命名"}</div>
+                      <div style={{fontSize:11,color:T.text4,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{effectiveJob?.title||c.screening?.roleDirection||"未绑定岗位"}</div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      {c.screening&&<div style={{fontSize:18,fontWeight:900,color:scColor(c.screening.overallScore),lineHeight:1}}>{c.screening.overallScore?.toFixed(1)}</div>}
+                      <div style={{fontSize:10,color:T.text4,marginTop:3}}>AI评分</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10,alignItems:"center"}}>
+                    <SBadge status={c.status}/>
+                    {!boundJob&&effectiveJob&&<span style={{fontSize:10,fontWeight:800,padding:"4px 8px",borderRadius:999,background:"#eff6ff",color:"#2563eb"}}>AI已识别岗位</span>}
+                    {!effectiveJob&&c.screening?.matchedJobTitle&&<span style={{fontSize:10,fontWeight:800,padding:"4px 8px",borderRadius:999,background:"#eff6ff",color:"#2563eb",maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>AI建议：{c.screening.matchedJobTitle}</span>}
+                    {c.statusSource==="manual"&&<span style={{fontSize:10,fontWeight:800,padding:"4px 8px",borderRadius:999,background:"#eef2ff",color:"#4f46e5"}}>手动状态</span>}
+                  </div>
+                  {(interviewTasks?.[c.id]?.loading || questionTasks?.[c.id]?.loading || c.scheduledAt || c.directorVerdict?.verdict)&&<div style={{display:"grid",gap:4,marginTop:10}}>
+                    {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",fontWeight:700}}>面试评估后台运行中</div>}
+                    {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>面试题后台生成中</div>}
+                    {c.status==="interview"&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>
+                      📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}`:"已进入面试 · 待安排时间"}
+                    </div>}
+                    {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed"}}>📅 {fmtDate(c.scheduledAt)}</div>}
+                    {c.directorVerdict?.verdict&&<div style={{fontSize:10,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
+                  </div>}
                 </div>
               </div>
-              {c.status==="interview"&&(
-                <div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26,fontWeight:700}}>
-                  📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}`:"已进入面试 · 待安排时间"}
-                </div>
-              )}
-              {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed",marginTop:5,marginLeft:26}}>📅 {fmtDate(c.scheduledAt)}</div>}
-              {c.directorVerdict?.verdict&&<div style={{fontSize:10,marginTop:3,marginLeft:26,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
             </div>);
           })}
         </div>
