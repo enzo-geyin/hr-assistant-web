@@ -3884,6 +3884,21 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     {id:"result",   label:"⑤ 评估结果",disabled:!cand.interviews?.some(i=>i.assessment)},
   ];
   const dir=cand.directorVerdict;
+  const currentStatusMeta=STATUS[cand.status]||STATUS.pending;
+  const previewTitle=visualPreview?.src?"简历版式预览":"简历识别文本";
+  const accentRole = job?.title || cand.screening?.roleDirection || "未绑定岗位";
+  const shellCard={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:CARD_RADIUS,
+    boxShadow:SOFT_SHADOW,
+  };
+  const minorPanel={
+    background:T.surface,
+    border:`1px solid ${T.border}`,
+    borderRadius:14,
+    boxShadow:"0 10px 24px rgba(15,23,42,0.05)",
+  };
   return(<div>
     {showPreviewLightbox&&currentPreviewSrc&&<div
       onClick={()=>setShowPreviewLightbox(false)}
@@ -3938,156 +3953,177 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         </div>
       </div>
     </div>}
-    <div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:CARD_RADIUS,padding:"18px 20px",marginBottom:14,boxShadow:SOFT_SHADOW}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:14,alignItems:"center",minWidth:0,flex:1}}>
-          <Av name={cand.name} T={T} size={48}/>
-          <div style={{minWidth:0}}>
-            <div style={{fontSize:20,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{cand.name||"未命名候选人"}</div>
-            <div style={{fontSize:12,color:T.text3,marginTop:4}}>{job?.title||cand.screening?.roleDirection||"未绑定岗位"}</div>
-            {!cand.jobId&&job&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,lineHeight:1.6}}>当前按识别岗位出题：<strong>{job.title}</strong></div>}
-            {!job&&cand.screening?.matchedJobTitle&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,lineHeight:1.6}}>AI建议岗位：<strong>{cand.screening.matchedJobTitle}</strong>{cand.screening?.matchedJobReason?` · ${cand.screening.matchedJobReason}`:""}</div>}
+    <div style={{...shellCard,padding:"24px 26px",marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:16,alignItems:"flex-start",minWidth:0,flex:1}}>
+          <Av name={cand.name} T={T} size={58}/>
+          <div style={{minWidth:0,flex:1}}>
+            <div style={{fontSize:26,fontWeight:900,color:T.text,letterSpacing:"-0.03em",lineHeight:1.05}}>{cand.name||"未命名候选人"}</div>
+            <div style={{fontSize:13,color:T.text3,marginTop:6,lineHeight:1.6}}>当前岗位：<strong style={{color:T.text}}>{accentRole}</strong></div>
+            {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.8,marginTop:12,maxWidth:760}}>{cand.screening.summary}</div>}
           </div>
         </div>
-        {cand.screening&&<div style={{textAlign:"center",padding:"8px 14px",background:T.card2,borderRadius:12,border:`1px solid ${T.border}`,minWidth:88}}>
-          <div style={{fontSize:24,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1}}>{cand.screening.overallScore?.toFixed(1)}</div>
-          <div style={{fontSize:10,color:T.text4,marginTop:4}}>AI评分</div>
-        </div>}
+        <div style={{display:"grid",gap:10,minWidth:180}}>
+          {cand.screening&&<div style={{padding:"14px 16px",borderRadius:16,background:T.card2,border:`1px solid ${T.border}`,textAlign:"left"}}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>AI 评分</div>
+            <div style={{fontSize:38,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1,marginTop:8}}>{cand.screening.overallScore?.toFixed(1)}</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:6}}>/ 5.0</div>
+          </div>}
+          <div style={{padding:"12px 14px",borderRadius:16,background:"#f8fafc",border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前进度</div>
+            <div style={{fontSize:16,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:8}}>{currentStatusMeta?.label||"待处理"}</div>
+            {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}</div>}
+          </div>
+        </div>
       </div>
 
-      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:14}}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:18}}>
+        {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
+        {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
+        {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
         {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
-        {cand.scheduledAt&&<span style={{fontSize:12,color:"#7c3aed",fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#f5f3ff"}}>📅 {fmtDate(cand.scheduledAt)}</span>}
+        {cand.statusSource==="manual"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>状态已手动锁定</span>}
         {!cand.jobId&&job&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>当前按识别岗位出题</span>}
         {cand.resumePreviewStatus==="generating"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8"}}>完整预览后台补全中</span>}
         {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
       </div>
+    </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"minmax(250px,1.2fr) minmax(220px,1fr) auto auto",gap:12,marginTop:16,alignItems:"end"}}>
-        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
-          <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
-          <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-            <option value="">未绑定岗位</option>
-            {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
-          </select>
-          {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
-        </div>
-        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14}}>
-          <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
-          <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-            {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-          </select>
-        </div>
-        <div style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:14,minHeight:44,display:"flex",flexDirection:"column",justifyContent:"center"}}>
-          <input
-            id={`candidate-resume-replace-${cand.id}`}
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
-            style={{display:"none"}}
-            onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
-          />
+    <div style={{display:"flex",gap:16,alignItems:"flex-start",flexWrap:"wrap",marginBottom:16}}>
+      {previewResume&&<div style={{...minorPanel,flex:"1 1 760px",padding:"18px 20px",minWidth:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:12,flexWrap:"wrap"}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{previewTitle}</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:5,lineHeight:1.7}}>
+              {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
+              {!visualPreview?.src&&cand.resumeFileName?" · 当前未保存原始版式预览":""}
+              {visualPreview?.previewMode==="light"?" · 当前先展示批量导入轻量预览":""}
+              {cand.resumePreviewStatus==="generating"?" · 完整预览正在后台生成，稍后会自动补齐":""}
+            </div>
+          </div>
           <button
-            onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
-            style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
+            onClick={()=>setShowResumePreview(prev=>!prev)}
+            style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:700}}
           >
-            {replaceLoading?"更新中...":"重新上传原始简历"}
+            {showResumePreview?"收起预览":"展开预览"}
           </button>
         </div>
-        <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
-      </div>
-      {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
-    </div>
-    <div style={{fontSize:11,color:T.text4,marginBottom:12,padding:"10px 12px",background:"#f8fafc",borderRadius:12,border:`1px solid ${T.border}`}}>这里可以直接给候选人匹配或修改岗位。切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
-    {previewResume&&<div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:"14px 16px",marginBottom:12,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:14,fontWeight:800,color:T.text}}>{visualPreview?.src?"简历版式预览":"简历识别文本"}</div>
-          <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>
-            {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
-            {!visualPreview?.src&&cand.resumeFileName?" · 当前未保存原始版式预览":""
-            }
-            {visualPreview?.previewMode==="light"?" · 当前先展示批量导入轻量预览":""}
-            {cand.resumePreviewStatus==="generating"?" · 完整预览正在后台生成，稍后会自动补齐":""}
+        {resumeKeywordHits.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
+          {resumeKeywordHits.map(hit=><Chip key={hit} c="#92400e" bg="#fef3c7">{hit}</Chip>)}
+        </div>}
+        {cand.screening?.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"12px 14px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:12,marginBottom:12}}>
+          <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
+        </div>}
+        {showResumePreview&&(
+          currentPreviewSrc
+            ? <div style={{padding:"14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+                  <div style={{fontSize:11,color:T.text4}}>
+                  {visualPreview.kind==="pdf"
+                    ? `直观预览：PDF 第${previewPage+1}页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
+                    : "直观预览：原始图片"}
+                  </div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    {visualPreview.kind==="pdf"&&previewPages.length>1&&<>
+                      <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage===0?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
+                      <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
+                    </>}
+                    <button onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}} style={{padding:"7px 11px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800}}>点击放大查看</button>
+                  </div>
+                </div>
+                <img
+                  src={currentPreviewSrc}
+                  alt={cand.resumeFileName||"简历预览"}
+                  onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
+                  style={{display:"block",width:"100%",maxHeight:520,objectFit:"contain",borderRadius:10,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
+                />
+                {visualPreview.kind==="pdf"&&visualPreview.previewMode==="light"&&visualPreview.pageCount>previewPages.length&&<div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>
+                  这是批量导入时保存的轻量预览，为了加速导入仅展示第一页。若需要完整页数预览，可在候选人详情里重新上传该简历。
+                </div>}
+                {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",gap:8,marginTop:12,overflowX:"auto",paddingBottom:4}}>
+                  {previewPages.map((pageSrc,index)=>(
+                    <button
+                      key={`inline-preview-page-${index}`}
+                      onClick={()=>setPreviewPage(index)}
+                      style={{padding:0,border:index===previewPage?"2px solid #60a5fa":"1px solid #dbe3ef",background:index===previewPage?"#eff6ff":"#fff",borderRadius:10,cursor:"pointer",overflow:"hidden",minWidth:76,flexShrink:0}}
+                    >
+                      <img src={pageSrc} alt={`第${index+1}页`} style={{display:"block",width:74,height:96,objectFit:"cover",background:"#f8fafc"}} />
+                      <div style={{padding:"4px 6px",fontSize:10,fontWeight:700,color:index===previewPage?"#2563eb":T.text4,textAlign:"center"}}>{`第${index+1}页`}</div>
+                    </button>
+                  ))}
+                </div>}
+              </div>
+            : <div>
+                <div style={{fontSize:11,color:"#92400e",marginBottom:10,padding:"12px 14px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:12,lineHeight:1.7}}>
+                  当前这份候选人没有保存到上传时的原始版式预览，所以这里展示的是识别后的文本，不是 PDF / 图片原样。
+                  如果你想看直观版式，需要重新上传一次原始简历文件。
+                </div>
+                <div style={{fontSize:12,color:T.text2,lineHeight:1.9,whiteSpace:"pre-wrap",padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,maxHeight:420,overflow:"auto"}}>
+                  {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
+                </div>
+              </div>
+        )}
+      </div>}
+
+      <div style={{flex:"0 0 320px",width:"min(100%, 360px)",display:"grid",gap:12,position:"sticky",top:18}}>
+        <div style={{...minorPanel,padding:"16px 16px 14px"}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
+          <div style={{display:"grid",gap:12}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
+              <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                <option value="">未绑定岗位</option>
+                {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
+              </select>
+              {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap",width:"100%"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
+              <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
           </div>
+          <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
         </div>
-        <button
-          onClick={()=>setShowResumePreview(prev=>!prev)}
-          style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:700}}
-        >
-          {showResumePreview?"收起预览":"展开预览"}
-        </button>
+
+        <div style={{...minorPanel,padding:"16px 16px 14px"}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
+          <div style={{display:"grid",gap:10}}>
+            <input
+              id={`candidate-resume-replace-${cand.id}`}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
+              style={{display:"none"}}
+              onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
+            />
+            <button
+              onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
+              style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
+            >
+              {replaceLoading?"更新中...":"重新上传原始简历"}
+            </button>
+            <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
+          </div>
+          {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
+        </div>
       </div>
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-        {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
-        {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
-        {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
-      </div>
-      {resumeKeywordHits.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-        {resumeKeywordHits.map(hit=><Chip key={hit} c="#92400e" bg="#fef3c7">{hit}</Chip>)}
-      </div>}
-      {cand.screening?.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.8,padding:"10px 12px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:10,marginBottom:10}}>
-        <strong style={{color:T.text}}>AI 岗位判断依据：</strong>{cand.screening.matchedJobReason}
-      </div>}
-      {showResumePreview&&(
-        currentPreviewSrc
-          ? <div style={{padding:"12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10,flexWrap:"wrap"}}>
-                <div style={{fontSize:11,color:T.text4}}>
-                {visualPreview.kind==="pdf"
-                  ? `直观预览：PDF 第${previewPage+1}页${visualPreview.pageCount ? ` / 共 ${visualPreview.pageCount} 页` : ""}`
-                  : "直观预览：原始图片"}
-                </div>
-                <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                  {visualPreview.kind==="pdf"&&previewPages.length>1&&<>
-                    <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage===0?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
-                    <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"7px 11px",background:"#ffffff",color:T.text3,border:`1px solid ${T.border2}`,borderRadius:9,cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
-                  </>}
-                  <button onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}} style={{padding:"7px 11px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:800}}>点击放大查看</button>
-                </div>
-              </div>
-              <img
-                src={currentPreviewSrc}
-                alt={cand.resumeFileName||"简历预览"}
-                onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
-                style={{display:"block",width:"100%",maxHeight:420,objectFit:"contain",borderRadius:8,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
-              />
-              {visualPreview.kind==="pdf"&&visualPreview.previewMode==="light"&&visualPreview.pageCount>previewPages.length&&<div style={{fontSize:11,color:T.text4,marginTop:8,lineHeight:1.7}}>
-                这是批量导入时保存的轻量预览，为了加速导入仅展示第一页。若需要完整页数预览，可在候选人详情里重新上传该简历。
-              </div>}
-              {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",gap:8,marginTop:10,overflowX:"auto",paddingBottom:4}}>
-                {previewPages.map((pageSrc,index)=>(
-                  <button
-                    key={`inline-preview-page-${index}`}
-                    onClick={()=>setPreviewPage(index)}
-                    style={{padding:0,border:index===previewPage?"2px solid #60a5fa":"1px solid #dbe3ef",background:index===previewPage?"#eff6ff":"#fff",borderRadius:10,cursor:"pointer",overflow:"hidden",minWidth:76,flexShrink:0}}
-                  >
-                    <img src={pageSrc} alt={`第${index+1}页`} style={{display:"block",width:74,height:96,objectFit:"cover",background:"#f8fafc"}} />
-                    <div style={{padding:"4px 6px",fontSize:10,fontWeight:700,color:index===previewPage?"#2563eb":T.text4,textAlign:"center"}}>{`第${index+1}页`}</div>
-                  </button>
-                ))}
-              </div>}
-            </div>
-          : <div>
-              <div style={{fontSize:11,color:"#92400e",marginBottom:10,padding:"10px 12px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,lineHeight:1.7}}>
-                当前这份候选人没有保存到上传时的原始版式预览，所以这里展示的是识别后的文本，不是 PDF / 图片原样。
-                如果你想看直观版式，需要重新上传一次原始简历文件。
-              </div>
-              <div style={{fontSize:12,color:T.text2,lineHeight:1.85,whiteSpace:"pre-wrap",padding:"12px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:10,maxHeight:280,overflow:"auto"}}>
-                {highlightTextByKeywords(readablePreview, resumeKeywordHits)}
-              </div>
-            </div>
-      )}
-    </div>}
-    <div style={{display:"flex",gap:6,marginBottom:16,background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:6,boxShadow:SOFT_SHADOW}}>
-      {tabs.map(t=><button key={t.id}
-        style={{flex:1,padding:"10px 8px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:10,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:500,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 10px 24px rgba(15,23,42,0.08)":"none"}}
-        disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
     </div>
-    {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
-    {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
-    {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
-    {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
-    {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
+
+    <div style={{...minorPanel,padding:8,marginBottom:16}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      {tabs.map(t=><button key={t.id}
+        style={{flex:"1 1 140px",padding:"11px 10px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:12,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:600,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 10px 24px rgba(15,23,42,0.08)":"none"}}
+        disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
+      </div>
+      <div style={{padding:"14px 10px 8px"}}>
+        {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
+        {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
+        {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
+        {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
+        {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
+      </div>
+    </div>
   </div>);
 }
 
