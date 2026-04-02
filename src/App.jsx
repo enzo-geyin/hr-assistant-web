@@ -3520,12 +3520,58 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
     setRulesSaved(true);
     setTimeout(()=>setRulesSaved(false),1500);
   };
+  const jobsShell={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:CARD_RADIUS,
+    boxShadow:SOFT_SHADOW,
+  };
+  const jobRailShell={...jobsShell,overflow:"hidden"};
+  const jobWorkbenchShell={...jobsShell,padding:"20px 22px"};
+  const jobFlowStats=job?[
+    {label:"候选人",value:jobCands.length,color:T.text},
+    {label:"进入面试",value:jobCands.filter(item=>item.status==="interview").length,color:"#7c3aed"},
+    {label:"已录用",value:jobCands.filter(item=>item.status==="offer").length,color:"#059669"},
+  ]:[];
+  const jobMeta=[job?.department,job?.level,job?.salary].filter(Boolean).join(" · ");
+  const requirementsList=(job?.requirements||"").split("\n").map(item=>item.trim()).filter(Boolean);
   return(<Page T={T} title="岗位管理" sub="创建和管理在招职位">
-    <div style={{display:"grid",gridTemplateColumns:"260px 1fr",gap:20}}>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,overflow:"hidden"}}>
-        <div style={{padding:"12px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,fontWeight:700,color:T.text}}>岗位列表</span>
-          <button onClick={()=>{if(open)resetCreateForm();else setJobComposer(prev=>({...prev,open:true}));}} style={{padding:"4px 10px",background:T.accent,color:T.accentFg,border:"none",borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer"}}>+ 新建</button>
+    <div style={{...jobsShell,padding:"18px 20px",marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:18,flexWrap:"wrap"}}>
+        <div style={{flex:"1 1 460px",minWidth:0}}>
+          <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>岗位工作台</div>
+          <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>左侧保持岗位轨道，右侧专注岗位详情、JD 规整与候选人推进。把岗位创建、规则维护和候选人流转放在同一条工作线上，不再拆成很多散卡片。</div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(112px,1fr))",gap:10,minWidth:320,flex:"0 0 360px"}}>
+          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>在招岗位</div>
+            <div style={{fontSize:24,fontWeight:900,color:T.text,marginTop:8,lineHeight:1}}>{jobs.length}</div>
+          </div>
+          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#ecfdf5",border:"1px solid #bbf7d0"}}>
+            <div style={{fontSize:10,fontWeight:800,color:"#059669",letterSpacing:"0.08em"}}>已入库候选人</div>
+            <div style={{fontSize:24,fontWeight:900,color:"#059669",marginTop:8,lineHeight:1}}>{cands.length}</div>
+          </div>
+          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#f5f3ff",border:"1px solid #ddd6fe"}}>
+            <div style={{fontSize:10,fontWeight:800,color:"#7c3aed",letterSpacing:"0.08em"}}>JD 识别任务</div>
+            <div style={{fontSize:24,fontWeight:900,color:"#7c3aed",marginTop:8,lineHeight:1}}>{jdLoading?1:0}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"320px minmax(0,1fr)",gap:18,alignItems:"start"}}>
+      <div style={jobRailShell}>
+        <div style={{padding:"16px 16px 14px",borderBottom:`1px solid ${T.border}`,background:"linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:900,color:T.text}}>岗位轨道</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>先建岗位，再在右侧推进规则和候选人。</div>
+            </div>
+            <button onClick={()=>{if(open)resetCreateForm();else setJobComposer(prev=>({...prev,open:true}));}} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:10,fontSize:12,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 22px rgba(15,23,42,0.12)"}}>+ 新建</button>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Chip c={T.text3} bg={T.card2}>{jobs.length} 个岗位</Chip>
+            <Chip c="#059669" bg="#ecfdf5">{cands.length} 位候选人</Chip>
+          </div>
         </div>
         {open&&(<div style={{padding:14,borderBottom:`1px solid ${T.border}`,background:T.card2}}>
           {jdLoading&&<div style={{marginBottom:12,padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:10,fontSize:12,color:"#1d4ed8",lineHeight:1.8}}>JD 正在后台识别中。你现在切换到其他页面也不会中断，回来后结果会自动保留在这里。</div>}
@@ -3604,63 +3650,126 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
             <button onClick={saveJob} style={{flex:2,padding:"8px",background:T.accent,color:T.accentFg,border:"none",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700,opacity:form.title&&form.requirements&&!jdLoading?1:0.4}} disabled={!form.title||!form.requirements||jdLoading}>保存</button>
           </div>
         </div>)}
-        <div style={{overflowY:"auto",maxHeight:"calc(100vh - 220px)"}}>
+        <div style={{overflowY:"auto",maxHeight:"calc(100vh - 250px)"}}>
           {jobs.length===0?<div style={{padding:"32px 16px",textAlign:"center",color:T.text4,fontSize:13}}>暂无岗位</div>
           :jobs.map(j=>(
             <div key={j.id} onClick={()=>setSelJob(j.id)} className="hr"
-              style={{padding:"12px 14px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",background:selJob===j.id?T.navActive:"transparent",borderLeft:selJob===j.id?`3px solid ${T.accent}`:"3px solid transparent"}}>
-              <div style={{display:"flex",justifyContent:"space-between"}}>
-                <div style={{fontSize:13,fontWeight:600,color:T.text}}>{j.title}</div>
-                <button onClick={e=>{e.stopPropagation();delJob(j.id);}} style={{border:"none",background:"transparent",color:T.text4,cursor:"pointer",fontSize:12}}>✕</button>
+              style={{padding:"14px 16px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",background:selJob===j.id?"linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(59,130,246,0.03) 100%)":"transparent",borderLeft:selJob===j.id?`3px solid ${T.accent}`:"3px solid transparent"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{j.title}</div>
+                  <div style={{fontSize:11,color:T.text4,marginTop:3}}>{j.department||"未指定"}{j.level?` · ${j.level}`:""}</div>
+                </div>
+                <button onClick={e=>{e.stopPropagation();delJob(j.id);}} style={{border:"none",background:"transparent",color:T.text4,cursor:"pointer",fontSize:12,lineHeight:1,flexShrink:0}}>✕</button>
               </div>
-              <div style={{fontSize:11,color:T.text4,marginTop:2}}>{j.department||"未指定"}{j.level?` · ${j.level}`:""}</div>
-              <div style={{fontSize:11,color:T.text3,marginTop:3}}>{cands.filter(c=>c.jobId===j.id).length} 位候选人</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:8,gap:10}}>
+                <span style={{fontSize:11,color:T.text3}}>{cands.filter(c=>c.jobId===j.id).length} 位候选人</span>
+                {selJob===j.id&&<Chip c={T.accent} bg={`${T.accent}12`}>当前查看</Chip>}
+              </div>
             </div>
           ))}
         </div>
       </div>
       {job?(<div>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 22px",marginBottom:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-            <div><h2 style={{fontSize:20,fontWeight:800,color:T.text,margin:0}}>{job.title}</h2><div style={{fontSize:13,color:T.text3,marginTop:3}}>{[job.department,job.level,job.salary].filter(Boolean).join(" · ")}</div></div>
-            <button onClick={addCand} style={{padding:"9px 18px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer"}}>+ 添加候选人</button>
-          </div>
-          {job.requirements&&<div style={{fontSize:13,color:T.text2,lineHeight:1.7,padding:"10px 14px",background:T.card2,borderRadius:8}}>{job.requirements}</div>}
-        </div>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 22px",marginBottom:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+        <div style={{...jobWorkbenchShell,marginBottom:14}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(250px,0.8fr)",gap:18,alignItems:"stretch"}}>
             <div>
-              <div style={{fontSize:14,fontWeight:800,color:T.text}}>岗位级面试准则模板</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>这里写的内容会直接并入“生成面试题”的 prompt。不同岗位可以维护不同的面试策略。</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,marginBottom:14,flexWrap:"wrap"}}>
+                <div style={{minWidth:0}}>
+                  <h2 style={{fontSize:24,fontWeight:900,color:T.text,margin:0,letterSpacing:"-0.03em"}}>{job.title}</h2>
+                  <div style={{fontSize:12,color:T.text3,marginTop:6,lineHeight:1.8}}>{jobMeta||"待补充岗位信息"}</div>
+                </div>
+                <button onClick={addCand} style={{padding:"10px 18px",background:T.accent,color:T.accentFg,border:"none",borderRadius:12,fontSize:13,fontWeight:800,cursor:"pointer",whiteSpace:"nowrap",boxShadow:"0 12px 24px rgba(15,23,42,0.12)"}}>+ 添加候选人</button>
+              </div>
+              {job.requirements&&<div style={{fontSize:13,color:T.text2,lineHeight:1.85,padding:"14px 16px",background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:16}}>{job.requirements}</div>}
             </div>
-            {rulesSaved&&<Chip c="#059669" bg="#ecfdf5">已保存</Chip>}
-          </div>
-          <textarea
-            rows={10}
-            value={interviewRulesDraft}
-            onChange={e=>setInterviewRulesDraft(e.target.value)}
-            style={{...inSt(T),resize:"vertical",lineHeight:1.7,marginBottom:12}}
-            placeholder={INTERVIEW_RULES_PROMPT}
-          />
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            <div style={{fontSize:12,color:T.text4,lineHeight:1.7}}>留空时自动使用系统默认准则；填了以后，这个岗位会优先用你自定义的版本。</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              <button onClick={()=>setInterviewRulesDraft(INTERVIEW_RULES_PROMPT)} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:8,color:T.text3,cursor:"pointer",fontSize:12,fontWeight:700}}>套用默认准则</button>
-              <button onClick={saveInterviewRules} style={{padding:"8px 14px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}>保存到当前岗位</button>
+            <div style={{padding:"16px",borderRadius:18,background:"linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位概览</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+                {jobFlowStats.map(item=>(
+                  <div key={item.label} style={{padding:"10px 10px 9px",borderRadius:12,background:"#ffffff",border:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{item.label}</div>
+                    <div style={{fontSize:22,fontWeight:900,color:item.color,marginTop:8,lineHeight:1}}>{item.value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12}}>
+                <div style={{padding:"10px 12px",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:12}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#c2410c",letterSpacing:"0.08em"}}>T0 条数</div>
+                  <div style={{fontSize:20,fontWeight:900,color:"#c2410c",marginTop:8,lineHeight:1}}>{job.t0?job.t0.split("\n").filter(Boolean).length:0}</div>
+                </div>
+                <div style={{padding:"10px 12px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:12}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#1d4ed8",letterSpacing:"0.08em"}}>T1 条数</div>
+                  <div style={{fontSize:20,fontWeight:900,color:"#1d4ed8",marginTop:8,lineHeight:1}}>{job.t1?job.t1.split("\n").filter(Boolean).length:0}</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-        <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 22px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,0.95fr) minmax(0,1.05fr)",gap:14,marginBottom:14}}>
+          <div style={{...jobWorkbenchShell,marginBottom:0}}>
+            <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:10}}>岗位要求与评分底座</div>
+            <div style={{display:"grid",gap:12}}>
+              <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+                <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>岗位要求</div>
+                {requirementsList.length
+                  ?<div style={{display:"grid",gap:7}}>
+                    {requirementsList.slice(0,6).map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.8}}>• {item}</div>)}
+                    {requirementsList.length>6&&<div style={{fontSize:11,color:T.text4}}>… 还有 {requirementsList.length-6} 条</div>}
+                  </div>
+                  :<div style={{fontSize:12,color:T.text4}}>暂未整理岗位要求</div>}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div style={{padding:"14px 16px",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:16}}>
+                  <div style={{fontSize:11,fontWeight:800,color:"#c2410c",letterSpacing:"0.08em",marginBottom:8}}>T0 硬性条件</div>
+                  {job.t0?.trim()
+                    ?job.t0.split("\n").filter(Boolean).map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.8}}>• {item}</div>)
+                    :<div style={{fontSize:12,color:T.text4}}>暂未设置</div>}
+                </div>
+                <div style={{padding:"14px 16px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:16}}>
+                  <div style={{fontSize:11,fontWeight:800,color:"#1d4ed8",letterSpacing:"0.08em",marginBottom:8}}>T1 核心维度</div>
+                  {job.t1?.trim()
+                    ?job.t1.split("\n").filter(Boolean).map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.8}}>• {item}</div>)
+                    :<div style={{fontSize:12,color:T.text4}}>暂未设置</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{...jobWorkbenchShell,marginBottom:0}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,color:T.text}}>岗位级面试准则模板</div>
+                <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>这里写的内容会直接并入“生成面试题”的 prompt。不同岗位可以维护不同的面试策略。</div>
+              </div>
+              {rulesSaved&&<Chip c="#059669" bg="#ecfdf5">已保存</Chip>}
+            </div>
+            <textarea
+              rows={12}
+              value={interviewRulesDraft}
+              onChange={e=>setInterviewRulesDraft(e.target.value)}
+              style={{...inSt(T),resize:"vertical",lineHeight:1.8,marginBottom:12,background:"#fbfcfe"}}
+              placeholder={INTERVIEW_RULES_PROMPT}
+            />
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:12,color:T.text4,lineHeight:1.7}}>留空时自动使用系统默认准则；填了以后，这个岗位会优先用你自定义的版本。</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button onClick={()=>setInterviewRulesDraft(INTERVIEW_RULES_PROMPT)} style={{padding:"8px 12px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:10,color:T.text3,cursor:"pointer",fontSize:12,fontWeight:700}}>套用默认准则</button>
+                <button onClick={saveInterviewRules} style={{padding:"8px 14px",background:T.accent,color:T.accentFg,border:"none",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:700}}>保存到当前岗位</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{...jobWorkbenchShell}}>
           <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:14}}>候选人 ({jobCands.length})</div>
           {jobCands.length===0?<div style={{textAlign:"center",padding:"28px",color:T.text4,fontSize:13}}>暂无候选人，点击右上角添加</div>
           :<>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 3fr 1fr 1fr 1fr",gap:8,padding:"6px 0",borderBottom:`2px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4,marginBottom:4}}>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 3fr 1fr 1fr 1fr",gap:8,padding:"8px 12px",borderBottom:`1px solid ${T.border}`,fontSize:11,fontWeight:700,color:T.text4,marginBottom:6,background:"#f8fafc",borderRadius:"12px 12px 0 0"}}>
               <span>姓名</span><span>AI结论</span><span style={{textAlign:"center"}}>评分</span><span style={{textAlign:"center"}}>状态</span><span style={{textAlign:"center"}}>面试时间</span>
             </div>
             {jobCands.map(c=>{
               const scr=c.screening;
               return(<div key={c.id} onClick={()=>onCandClick(c.id,c.jobId)} className="hr"
-                style={{display:"grid",gridTemplateColumns:"2fr 3fr 1fr 1fr 1fr",gap:8,padding:"10px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer",alignItems:"center"}}>
+                style={{display:"grid",gridTemplateColumns:"2fr 3fr 1fr 1fr 1fr",gap:8,padding:"11px 12px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",alignItems:"center",borderRadius:12}}>
                 <div style={{display:"flex",gap:7,alignItems:"center"}}><Av name={c.name} T={T} size={26}/><span style={{fontSize:13,fontWeight:600,color:T.text}}>{c.name||<span style={{color:T.text4}}>未命名</span>}</span></div>
                 <span style={{fontSize:12,color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{scr?.summary?scr.summary.slice(0,35)+"…":<span style={{color:T.border2}}>未筛选</span>}</span>
                 <span style={{textAlign:"center",fontWeight:700,color:scr?scColor(scr.overallScore):T.text4}}>{scr?scr.overallScore?.toFixed(1):"—"}</span>
@@ -4170,52 +4279,99 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         </div>
       </div>
     </div>}
-    <div style={{...shellCard,padding:"24px 26px",marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:20,flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:16,alignItems:"flex-start",minWidth:0,flex:1}}>
-          <Av name={cand.name} T={T} size={58}/>
-          <div style={{minWidth:0,flex:1}}>
-            <div style={{fontSize:26,fontWeight:900,color:T.text,letterSpacing:"-0.03em",lineHeight:1.05}}>{cand.name||"未命名候选人"}</div>
-            <div style={{fontSize:13,color:T.text3,marginTop:6,lineHeight:1.6}}>当前岗位：<strong style={{color:T.text}}>{accentRole}</strong></div>
-            {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.8,marginTop:12,maxWidth:760}}>{cand.screening.summary}</div>}
+    <div style={{...shellCard,padding:"24px 24px 20px",marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.35fr) minmax(240px,0.65fr)",gap:18,alignItems:"start"}}>
+        <div style={{display:"grid",gap:16,minWidth:0}}>
+          <div style={{display:"flex",gap:16,alignItems:"flex-start",minWidth:0}}>
+            <Av name={cand.name} T={T} size={58}/>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:28,fontWeight:900,color:T.text,letterSpacing:"-0.035em",lineHeight:1.04}}>{cand.name||"未命名候选人"}</div>
+              <div style={{fontSize:13,color:T.text3,marginTop:7,lineHeight:1.7}}>当前岗位：<strong style={{color:T.text}}>{accentRole}</strong></div>
+              {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.82,marginTop:12,maxWidth:760}}>{cand.screening.summary}</div>}
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+            {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
+            {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
+            {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
+            {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
+            {cand.statusSource==="manual"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>状态已手动锁定</span>}
+            {!cand.jobId&&job&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>当前按识别岗位出题</span>}
+            {cand.resumePreviewStatus==="generating"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8"}}>完整预览后台补全中</span>}
+            {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
+            {overviewFacts.map(fact=>(
+              <div key={fact.label} style={{padding:"12px 14px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</div>
+                <div style={{fontSize:14,fontWeight:800,color:fact.tone||T.text,lineHeight:1.6,marginTop:8,wordBreak:"break-word"}}>{fact.value}</div>
+              </div>
+            ))}
           </div>
         </div>
-        <div style={{display:"grid",gap:10,minWidth:180}}>
-          {cand.screening&&<div style={{padding:"14px 16px",borderRadius:16,background:T.card2,border:`1px solid ${T.border}`,textAlign:"left"}}>
+
+        <div style={{display:"grid",gap:12}}>
+          {cand.screening&&<div style={{padding:"16px 18px",borderRadius:18,background:"#f8fbff",border:`1px solid ${T.border}`,textAlign:"left",boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
             <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>AI 评分</div>
-            <div style={{fontSize:38,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1,marginTop:8}}>{cand.screening.overallScore?.toFixed(1)}</div>
+            <div style={{fontSize:42,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1,marginTop:10}}>{cand.screening.overallScore?.toFixed(1)}</div>
             <div style={{fontSize:11,color:T.text4,marginTop:6}}>/ 5.0</div>
           </div>}
-          <div style={{padding:"12px 14px",borderRadius:16,background:"#f8fafc",border:`1px solid ${T.border}`}}>
+          <div style={{padding:"14px 16px",borderRadius:18,background:"#f8fafc",border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
             <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前进度</div>
-            <div style={{fontSize:16,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:8}}>{currentStatusMeta?.label||"待处理"}</div>
+            <div style={{fontSize:17,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:10}}>{currentStatusMeta?.label||"待处理"}</div>
             {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}</div>}
           </div>
         </div>
       </div>
-
-      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginTop:18}}>
-        {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
-        {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
-        {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
-        {dir?.verdict&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:dir.verdict==="录用"?"#ecfdf5":dir.verdict==="淘汰"?"#fef2f2":"#fffbeb",color:dir.verdict==="录用"?"#059669":dir.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{dir.verdict}</span>}
-        {cand.statusSource==="manual"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>状态已手动锁定</span>}
-        {!cand.jobId&&job&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb"}}>当前按识别岗位出题</span>}
-        {cand.resumePreviewStatus==="generating"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#dbeafe",color:"#1d4ed8"}}>完整预览后台补全中</span>}
-        {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12,marginTop:18}}>
-        {overviewFacts.map(fact=>(
-          <div key={fact.label} style={{padding:"12px 14px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</div>
-            <div style={{fontSize:14,fontWeight:800,color:fact.tone||T.text,lineHeight:1.6,marginTop:8,wordBreak:"break-word"}}>{fact.value}</div>
-          </div>
-        ))}
-      </div>
     </div>
 
     <div style={{display:"grid",gap:16,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))",gap:16}}>
+        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
+          <div style={{display:"grid",gap:12}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
+              <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                <option value="">未绑定岗位</option>
+                {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
+              </select>
+              {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap",width:"100%"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
+              <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
+        </div>
+
+        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
+          <div style={{display:"grid",gap:10}}>
+            <input
+              id={`candidate-resume-replace-${cand.id}`}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
+              style={{display:"none"}}
+              onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
+            />
+            <button
+              onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
+              style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
+            >
+              {replaceLoading?"更新中...":"重新上传原始简历"}
+            </button>
+            <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
+          </div>
+          {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
+        </div>
+      </div>
+
       {previewResume&&<div style={{...minorPanel,padding:"18px 20px",minWidth:0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
@@ -4291,58 +4447,15 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         )}
       </div>}
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(280px, 1fr))",gap:16}}>
-        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
-          <div style={{display:"grid",gap:12}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
-              <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-                <option value="">未绑定岗位</option>
-                {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
-              </select>
-              {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap",width:"100%"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
-            </div>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
-              <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-                {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
-        </div>
-
-        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
-          <div style={{display:"grid",gap:10}}>
-            <input
-              id={`candidate-resume-replace-${cand.id}`}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
-              style={{display:"none"}}
-              onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
-            />
-            <button
-              onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
-              style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
-            >
-              {replaceLoading?"更新中...":"重新上传原始简历"}
-            </button>
-            <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
-          </div>
-          {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
-        </div>
-      </div>
     </div>
 
-    <div style={{...minorPanel,padding:8,marginBottom:16}}>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+    <div style={{...minorPanel,padding:10,marginBottom:16}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",padding:"4px 4px 0"}}>
       {tabs.map(t=><button key={t.id}
-        style={{flex:"1 1 140px",padding:"11px 10px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:12,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:600,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 10px 24px rgba(15,23,42,0.08)":"none"}}
+        style={{flex:"1 1 140px",padding:"12px 12px",border:"none",background:tab===t.id?T.tabActive:"transparent",color:tab===t.id?T.tabActiveFg:T.text3,borderRadius:12,cursor:t.disabled?"not-allowed":"pointer",fontSize:12,fontWeight:tab===t.id?800:600,opacity:t.disabled?0.4:1,transition:"all 0.1s",boxShadow:tab===t.id?"0 12px 28px rgba(15,23,42,0.1)":"none"}}
         disabled={t.disabled} onClick={()=>setTab(t.id)}>{t.label}</button>)}
       </div>
-      <div style={{padding:"14px 10px 8px"}}>
+      <div style={{padding:"16px 12px 10px"}}>
         {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
         {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
         {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
@@ -4676,6 +4789,12 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const timeInputRef=useRef(null);
   const prevInterviewCountRef=useRef((cand.interviews||[]).length);
   const currentFileKind=noteFile?getFileKind(noteFile):"unknown";
+  const workPanel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+  };
   const fileStageMeta={
     idle:{label:"未上传",bg:T.card2,color:T.text4},
     queued:{label:"已选择",bg:"#eff6ff",color:"#2563eb"},
@@ -4781,153 +4900,206 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   };
 
   return(<div>
-    {(cand.interviews||[]).map((ir,i)=><IRecord key={i} T={T} record={ir}/>)}
-    <SCard T={T} title="📅 安排面试时间">
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr auto",gap:10,alignItems:"flex-end"}}>
-        <div><label style={lbSt(T)}>面试轮次</label>
-          <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T)}}>
-            {roundOptions.map(r=><option key={r}>{r}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={lbSt(T)}>面试日期</label>
-          <div style={{display:"flex",gap:8}}>
-            <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1}}/>
-            <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:8,background:T.surface,color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
+    {(cand.interviews||[]).length>0&&<div style={{marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>面试轨迹</div>
+      {(cand.interviews||[]).map((ir,i)=><IRecord key={i} T={T} record={ir}/>)}
+    </div>}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))",gap:16,alignItems:"start"}}>
+      <div style={{display:"grid",gap:16}}>
+        <div style={{...workPanel,padding:"18px 18px 16px"}}>
+          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:12}}>安排面试时间</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div><label style={lbSt(T)}>面试轮次</label>
+              <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T)}}>
+                {roundOptions.map(r=><option key={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={lbSt(T)}>面试日期</label>
+              <div style={{display:"flex",gap:8}}>
+                <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1}}/>
+                <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
+              </div>
+            </div>
+            <div>
+              <label style={lbSt(T)}>面试时间</label>
+              <div style={{display:"flex",gap:8}}>
+                <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1}}/>
+                <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
+              </div>
+            </div>
+            <div style={{display:"grid",gap:8,alignContent:"end"}}>
+              <button onClick={saveSchedule} disabled={!schedDate}
+                style={{padding:"10px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:10,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>
+                {cand.scheduledAt?"更新预约":"确认预约"}
+              </button>
+              {cand.scheduledAt&&<button
+                onClick={clearSchedule}
+                style={{padding:"10px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}
+              >
+                删除预约
+              </button>}
+            </div>
           </div>
+          {isSingleRoundLevel(job?.level)&&<div style={{marginTop:12,fontSize:12,color:T.text3,lineHeight:1.75,padding:"10px 12px",background:T.card2,borderRadius:12}}>
+            当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
+          </div>}
+          {cand.scheduledAt&&<div style={{marginTop:12,fontSize:13,color:"#7c3aed",fontWeight:700}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
         </div>
-        <div>
-          <label style={lbSt(T)}>面试时间</label>
-          <div style={{display:"flex",gap:8}}>
-            <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1}}/>
-            <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:8,background:T.surface,color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
+
+        <div style={{...workPanel,padding:"18px 18px 16px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>上传面试记录文件</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>支持 PDF、图片、Word(.docx)、txt / md 与录音文件，识别后会自动追加到笔记里。</div>
+            </div>
+            {fileStage!=="idle"&&<span style={{padding:"5px 10px",borderRadius:999,fontSize:11,fontWeight:700,background:fileStageMeta.bg,color:fileStageMeta.color}}>{fileStageMeta.label}</span>}
           </div>
-        </div>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <button onClick={saveSchedule} disabled={!schedDate}
-            style={{padding:"8px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:7,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>
-            {cand.scheduledAt?"更新预约":"确认预约"}
-          </button>
-          {cand.scheduledAt&&<button
-            onClick={clearSchedule}
-            style={{padding:"8px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:7,cursor:"pointer",fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}
-          >
-            删除预约
-          </button>}
+          <div
+            onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
+            onDragLeave={()=>setNoteDrag(false)}
+            onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
+            onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
+            style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:14,padding:"22px 16px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:12}}>
+            <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
+            {fileLoading
+              ?<div><Spin text={currentFileKind==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到右侧笔记</div></div>
+              :noteFileName
+                ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
+                :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>}
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:11,color:T.text4,lineHeight:1.7}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
+            <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"9px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:800}}>
+              {fileLoading?"识别中...":"识别并追加到笔记"}
+            </button>
+          </div>
         </div>
       </div>
-      {isSingleRoundLevel(job?.level)&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7,padding:"8px 10px",background:T.card2,borderRadius:8}}>
-        当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
-      </div>}
-      {cand.scheduledAt&&<div style={{marginTop:10,fontSize:13,color:"#7c3aed",fontWeight:600}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)} · 可直接改时间后点“更新预约”，或点“删除预约”清除安排</div>}
-    </SCard>
-    <SCard T={T} title="录入面试记录">
-      {loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 面试综合评估正在后台运行中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
-      <div style={{marginBottom:12,padding:"14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+
+      <div style={{...workPanel,padding:"18px 18px 16px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:12}}>
           <div>
-            <div style={{fontSize:13,fontWeight:700,color:T.text}}>上传面试记录文件</div>
-            <div style={{fontSize:11,color:T.text4,marginTop:3}}>支持 PDF、图片、Word(.docx)、txt / md 与录音文件，识别后会自动追加到笔记里</div>
+            <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试笔记与综合评估</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>把人工笔记、文件识别结果和历史判断标准收进一处，当前页直接完成综合判断。</div>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            {fileStage!=="idle"&&(
-              <span style={{
-                padding:"5px 10px",
-                borderRadius:999,
-                fontSize:11,
-                fontWeight:700,
-                background:fileStageMeta.bg,
-                color:fileStageMeta.color
-              }}>
-                {fileStageMeta.label}
-              </span>
-            )}
-            <button onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()} style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:fileLoading?"not-allowed":"pointer",opacity:fileLoading?0.5:1}}>选择文件</button>
-          </div>
+          {loading&&<span style={{fontSize:11,color:"#2563eb",padding:"5px 10px",background:"#eff6ff",borderRadius:999,fontWeight:700}}>后台评估运行中</span>}
         </div>
-        <div
-          onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
-          onDragLeave={()=>setNoteDrag(false)}
-          onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
-          onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
-          style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:12,padding:"18px 14px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:10}}>
-          <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
-          {fileLoading
-            ?<div><Spin text={currentFileKind==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到下方笔记</div></div>
-            :noteFileName
-              ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
-              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>
-          }
+        <div style={{marginBottom:12}}><label style={lbSt(T)}>面试笔记 *</label>
+          <textarea rows={14} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.8}}
+            placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
         </div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <div style={{fontSize:11,color:T.text4}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
-          <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"8px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:8,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:700}}>
-            {fileLoading?"识别中...":"识别并追加到笔记"}
-          </button>
-        </div>
+        {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"7px 10px",background:`${T.accent}10`,borderRadius:10}}>✦ AI将参考你的历史判断标准进行评估</div>}
+        {loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"7px 10px",background:"#eff6ff",borderRadius:10}}>✦ 面试综合评估正在后台运行中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
+        {err&&<ErrBox>{err}</ErrBox>}
+        {!!rawErr&&<details style={{marginBottom:10}}>
+          <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
+          <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
+        </details>}
+        <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
       </div>
-      <div style={{marginBottom:12}}><label style={lbSt(T)}>面试笔记 *</label>
-        <textarea rows={10} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.7}}
-          placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
-      </div>
-      {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ AI将参考你的历史判断标准进行评估</div>}
-      {err&&<ErrBox>{err}</ErrBox>}
-      {!!rawErr&&<details style={{marginBottom:10}}>
-        <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
-        <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
-      </details>}
-      <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
-    </SCard>
+    </div>
   </div>);
 }
 function IRecord({T,record}) {
   const [open,setOpen]=useState(true);
   const ast=record.assessment;
   const dc=ast?.decision==="通过"?{c:"#16a34a",bg:"#dcfce7"}:ast?.decision==="淘汰"?{c:"#dc2626",bg:"#fee2e2"}:{c:"#ca8a04",bg:"#fef9c3"};
-  return(<div style={{...cardSt(T),borderLeft:`4px solid ${dc.c}`,marginBottom:14}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}} onClick={()=>setOpen(!open)}>
-      <div style={{display:"flex",gap:10,alignItems:"center"}}>
-        <Chip c={dc.c} bg={dc.bg}>{record.round}</Chip>
-        <span style={{fontSize:12,color:T.text3}}>{record.date}</span>
-        {ast&&<Chip c={dc.c} bg={dc.bg}>{ast.decision}</Chip>}
-      </div>
-      {ast&&<span style={{fontWeight:900,fontSize:20,color:scColor(ast.score)}}>{ast.score?.toFixed(1)}</span>}
+  const panel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+    overflow:"hidden",
+  };
+  const statBlock=(label,value,tone=dc.c,bg=T.card2)=>(
+    <div style={{padding:"12px 13px",borderRadius:14,background:bg,border:`1px solid ${T.border}`}}>
+      <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>{label}</div>
+      <div style={{fontSize:20,fontWeight:900,color:tone,lineHeight:1.15}}>{value}</div>
     </div>
-    {open&&ast&&<div style={{marginTop:14}}>
-      <div style={{padding:"10px 13px",background:T.card2,borderRadius:8,marginBottom:12}}>
-        <div style={{fontSize:12,color:T.text3,marginBottom:3}}>JD匹配：<strong style={{color:T.text}}>{ast.jdMatch}</strong></div>
-        <div style={{fontSize:13,color:T.text2,fontWeight:500}}>💡 {ast.suggestion}</div>
+  );
+  return(<div style={{...panel,marginBottom:16}}>
+    <div style={{padding:"18px 20px 16px",display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:16,alignItems:"center",cursor:"pointer"}} onClick={()=>setOpen(!open)}>
+      <div>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+          <Chip c={dc.c} bg={dc.bg}>{record.round}</Chip>
+          <span style={{fontSize:12,color:T.text4,fontWeight:600}}>{record.date}</span>
+          {ast&&<Chip c={dc.c} bg={dc.bg}>{ast.decision}</Chip>}
+        </div>
+        <div style={{fontSize:15,fontWeight:850,color:T.text,letterSpacing:"-0.02em",lineHeight:1.45}}>
+          {ast?.suggestion || "等待综合评估结论"}
+        </div>
       </div>
-      {ast.dimensions?.length>0&&<div style={{marginBottom:14}}>
-        <SecLabel T={T}>维度评分</SecLabel>
-        {ast.dimensions.map((d,i)=>(<div key={i} style={{padding:"9px 0",borderBottom:`1px solid ${T.border}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{fontSize:13,fontWeight:600,color:T.text}}>{d.name}</span>
-            <div style={{display:"flex",gap:7,alignItems:"center"}}>
-              {d.vsResume&&<Chip c={d.vsResume==="一致"?"#16a34a":d.vsResume==="存疑"?"#ca8a04":"#dc2626"} bg={d.vsResume==="一致"?"#dcfce7":d.vsResume==="存疑"?"#fef9c3":"#fee2e2"}>vs简历:{d.vsResume}</Chip>}
-              <span style={{fontWeight:700,color:scColor(d.score,d.maxScore||5)}}>{d.score}/{d.maxScore||5}</span>
+      <div style={{display:"flex",alignItems:"center",gap:16}}>
+        {ast&&<div style={{textAlign:"right"}}>
+          <div style={{fontSize:11,color:T.text4,marginBottom:4}}>综合评分</div>
+          <div style={{fontSize:30,fontWeight:950,color:scColor(ast.score),lineHeight:1}}>{ast.score?.toFixed(1)}</div>
+          <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+        </div>}
+        <span style={{fontSize:16,color:T.text4}}>{open?"▾":"▸"}</span>
+      </div>
+    </div>
+    {open&&ast&&<div style={{padding:"0 20px 20px",display:"grid",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+        {statBlock("JD 匹配",ast.jdMatch||"待确认",dc.c,dc.bg)}
+        {ast.emotions?.stabilityRisk && statBlock("稳定性",ast.emotions.stabilityRisk,ast.emotions.stabilityRisk==="低"?"#16a34a":ast.emotions.stabilityRisk==="高"?"#dc2626":"#ca8a04")}
+        {ast.emotions?.managementDifficulty && statBlock("管理难度",ast.emotions.managementDifficulty,ast.emotions.managementDifficulty==="低"?"#16a34a":ast.emotions.managementDifficulty==="高"?"#dc2626":"#ca8a04")}
+      </div>
+
+      {ast.dimensions?.length>0&&<div style={{padding:"16px 18px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+          <div style={{fontSize:13,fontWeight:800,color:T.text,letterSpacing:"0.04em"}}>维度回放</div>
+          <div style={{fontSize:11,color:T.text4}}>把每个维度拆开看，方便快速回忆这一轮到底凭什么通过或卡住。</div>
+        </div>
+        <div style={{display:"grid",gap:12}}>
+          {ast.dimensions.map((d,i)=>(<div key={i} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:12,alignItems:"start",paddingBottom:12,borderBottom:i===ast.dimensions.length-1?"none":`1px solid ${T.border}`}}>
+            <div>
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+                <span style={{fontSize:13,fontWeight:800,color:T.text}}>{d.name}</span>
+                {d.vsResume&&<Chip c={d.vsResume==="一致"?"#16a34a":d.vsResume==="存疑"?"#ca8a04":"#dc2626"} bg={d.vsResume==="一致"?"#dcfce7":d.vsResume==="存疑"?"#fef9c3":"#fee2e2"}>vs简历:{d.vsResume}</Chip>}
+              </div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>{d.note}</div>
             </div>
+            <div style={{minWidth:120}}>
+              <div style={{fontSize:18,fontWeight:900,color:scColor(d.score,d.maxScore||5),textAlign:"right"}}>{d.score}/{d.maxScore||5}</div>
+              <MiniBar score={d.score} max={d.maxScore||5} color={scColor(d.score,d.maxScore||5)}/>
+            </div>
+          </div>))}
+        </div>
+      </div>}
+
+      {(ast.highlights?.length>0 || ast.concerns?.length>0 || ast.interviewerReview)&&<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:12}}>
+        {ast.highlights?.length>0&&<div style={{padding:"14px 16px",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#166534",letterSpacing:"0.04em",marginBottom:8}}>亮点</div>
+          <div style={{display:"grid",gap:6}}>
+            {ast.highlights.map((h,i)=><div key={i} style={{fontSize:12,color:"#14532d",lineHeight:1.75}}>✓ {h}</div>)}
           </div>
-          <div style={{fontSize:12,color:T.text3}}>{d.note}</div>
-          <MiniBar score={d.score} max={d.maxScore||5} color={scColor(d.score,d.maxScore||5)}/>
-        </div>))}
+        </div>}
+        {ast.concerns?.length>0&&<div style={{padding:"14px 16px",background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#9a3412",letterSpacing:"0.04em",marginBottom:8}}>顾虑</div>
+          <div style={{display:"grid",gap:6}}>
+            {ast.concerns.map((c,i)=><div key={i} style={{fontSize:12,color:"#9a3412",lineHeight:1.75}}>• {c}</div>)}
+          </div>
+        </div>}
+        {ast.interviewerReview&&<div style={{padding:"14px 16px",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#1d4ed8",letterSpacing:"0.04em",marginBottom:8}}>面试官复盘</div>
+          <div style={{fontSize:12,color:"#1e3a8a",lineHeight:1.8}}>{ast.interviewerReview}</div>
+        </div>}
       </div>}
-      {ast.emotions&&<div style={{marginBottom:12,background:T.card2,borderRadius:8,padding:"10px 13px",fontSize:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <div><span style={{color:T.text3}}>真实动机：</span><span style={{color:T.text}}>{ast.emotions.trueMotivation}</span></div>
-        <div><span style={{color:T.text3}}>诉求优先：</span><span style={{color:T.text}}>{ast.emotions.needsPriority}</span></div>
-        <div><span style={{color:T.text3}}>稳定性：</span><span style={{color:ast.emotions.stabilityRisk==="低"?"#16a34a":ast.emotions.stabilityRisk==="高"?"#dc2626":"#ca8a04",fontWeight:600}}>{ast.emotions.stabilityRisk}</span>{ast.emotions.stabilityNote&&<span style={{color:T.text4}}> — {ast.emotions.stabilityNote}</span>}</div>
-        <div><span style={{color:T.text3}}>管理难度：</span><span style={{color:ast.emotions.managementDifficulty==="低"?"#16a34a":ast.emotions.managementDifficulty==="高"?"#dc2626":"#ca8a04",fontWeight:600}}>{ast.emotions.managementDifficulty}</span>{ast.emotions.managementNote&&<span style={{color:T.text4}}> — {ast.emotions.managementNote}</span>}</div>
+
+      {ast.emotions&&<div style={{padding:"14px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
+        <div style={{fontSize:12,fontWeight:800,color:T.text,letterSpacing:"0.04em",marginBottom:10}}>真实动机与管理判断</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:12}}>
+          <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}><span style={{color:T.text4}}>真实动机：</span>{ast.emotions.trueMotivation}</div>
+          <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}><span style={{color:T.text4}}>诉求优先：</span>{ast.emotions.needsPriority}</div>
+          <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}><span style={{color:T.text4}}>稳定性说明：</span>{ast.emotions.stabilityNote||"未补充"}</div>
+          <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}><span style={{color:T.text4}}>管理难度说明：</span>{ast.emotions.managementNote||"未补充"}</div>
+        </div>
       </div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:12}}>
-        {ast.highlights?.length>0&&<div><SecLabel T={T}>+ 亮点</SecLabel>{ast.highlights.map((h,i)=><div key={i} style={{fontSize:12,color:T.text2,padding:"2px 0"}}>✓ {h}</div>)}</div>}
-        {ast.concerns?.length>0&&<div><SecLabel T={T}>! 顾虑</SecLabel>{ast.concerns.map((c,i)=><div key={i} style={{fontSize:12,color:T.text2,padding:"2px 0"}}>• {c}</div>)}</div>}
-      </div>
-      {ast.interviewerReview&&<div style={{padding:"9px 12px",background:"#eff6ff",borderRadius:7,borderLeft:"3px solid #2563eb"}}>
-        <div style={{fontSize:11,fontWeight:700,color:"#1e40af",marginBottom:3}}>面试官复盘</div>
-        <div style={{fontSize:12,color:"#374151"}}>{ast.interviewerReview}</div>
-      </div>}
-      <details style={{marginTop:10}}><summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>▶ 查看笔记原文</summary>
-        <div style={{fontSize:12,color:T.text3,padding:"9px",background:T.card2,borderRadius:6,marginTop:6,whiteSpace:"pre-wrap",lineHeight:1.7}}>{record.notes}</div>
+
+      <details>
+        <summary style={{fontSize:11,color:T.text4,cursor:"pointer",fontWeight:700,letterSpacing:"0.04em"}}>查看笔记原文</summary>
+        <div style={{fontSize:12,color:T.text3,padding:"12px 14px",background:T.card2,borderRadius:12,marginTop:8,whiteSpace:"pre-wrap",lineHeight:1.8,border:`1px solid ${T.border}`}}>{record.notes}</div>
       </details>
     </div>}
   </div>);
@@ -4944,24 +5116,24 @@ function QuestionBankPanel({T,learning}) {
   const hasDynamic = sections.some(([key])=>Array.isArray(bank?.[key])&&bank[key].length);
   if (!hasDynamic && !learning?.questionBankSummary) return null;
   return (
-    <div style={{...cardSt(T),marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+    <div style={{background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,border:`1px solid ${T.border}`,borderRadius:18,boxShadow:"0 14px 32px rgba(15,23,42,0.06)",padding:"18px 20px",marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
         <div>
-          <div style={{fontSize:13,fontWeight:700,color:T.text}}>题库优化面板</div>
-          {learning?.questionBankSummary&&<div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>{learning.questionBankSummary}</div>}
+          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>题库优化面板</div>
+          {learning?.questionBankSummary&&<div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75,maxWidth:760}}>{learning.questionBankSummary}</div>}
         </div>
         {learning?.questionBankVersion&&<Chip c="#7c3aed" bg="#f5f3ff">题库 v{learning.questionBankVersion}</Chip>}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:12}}>
         {sections.map(([key,label,fmtItem])=>{
           const items = Array.isArray(bank?.[key]) ? bank[key].slice(0,4) : [];
           if (!items.length) return null;
           return (
-            <div key={key} style={{padding:"12px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10}}>
-              <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:8}}>{label}</div>
+            <div key={key} style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+              <div style={{fontSize:12,fontWeight:800,color:T.text,letterSpacing:"0.04em",marginBottom:10}}>{label}</div>
               <div style={{display:"grid",gap:8}}>
                 {items.map((item,index)=>(
-                  <div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.7,paddingBottom:8,borderBottom:index===items.length-1?"none":`1px solid ${T.border}`}}>
+                  <div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75,paddingBottom:10,borderBottom:index===items.length-1?"none":`1px solid ${T.border}`}}>
                     {fmtItem(item)}
                   </div>
                 ))}
@@ -5087,88 +5259,101 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
     setSaving(false);
   };
 
+  const panel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+  };
+
   return(<div>
-    <div style={{...cardSt(T),borderLeft:`4px solid ${T.accent}`,marginBottom:14}}>
-      <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6}}>🧠 总监判断沉淀系统</div>
-      <div style={{fontSize:13,color:T.text2,lineHeight:1.7}}>
-        你对候选人的最终判断和点评，将自动积累成 AI 的参考标准。<br/>
-        <strong style={{color:T.accent}}>积累越多，AI 越懂你的用人偏好，评估越准。</strong>
-      </div>
-    </div>
-    <div style={{...cardSt(T),marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:13,fontWeight:700,color:T.text}}>岗位学习状态</div>
-          <div style={{fontSize:12,color:T.text4,marginTop:4}}>
-            当前岗位已沉淀 {Number(learning?.sampleCount)||0} 条学习样本
-            {learning?.rubricVersion?` · 规则 v${learning.rubricVersion}`:" · 暂无规则版本"}
-            {learning?.questionBankVersion?` · 题库 v${learning.questionBankVersion}`:" · 暂无题库版本"}
+    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(340px,0.85fr)",gap:16,alignItems:"start",marginBottom:16}}>
+      <div style={{...panel,padding:"20px 22px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{saved?"更新我的判断":"填写我的判断"}</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:560}}>最终结果以面试官/总监判断为准。这里不是简单给结论，而是把你真正的判断依据沉淀成可学习的规则样本。</div>
+          </div>
+          {saved&&<Chip c="#059669" bg="#ecfdf5">已保存于 {dir.date}</Chip>}
+        </div>
+
+        <div style={{padding:"14px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16,marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>最终决定</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:10}}>
+            {[["录用","#059669","#ecfdf5"],["通过","#2563eb","#eff6ff"],["待定","#ca8a04","#fef9c3"],["淘汰","#dc2626","#fef2f2"]].map(([v,c,bg])=>(
+              <div key={v} onClick={()=>setVerdict(v)}
+                style={{padding:"13px 10px",textAlign:"center",borderRadius:14,border:`2px solid ${verdict===v?c:T.border}`,cursor:"pointer",background:verdict===v?bg:"#ffffff",fontWeight:850,fontSize:13,color:verdict===v?c:T.text3,transition:"all 0.1s"}}>
+                {v}
+              </div>
+            ))}
           </div>
         </div>
-        {learningState?.loading&&<Chip c="#2563eb" bg="#eff6ff">学习数据加载中</Chip>}
-        {!learningState?.loading&&learning?.rubricVersion&&<Chip c="#059669" bg="#ecfdf5">已启用学习规则</Chip>}
-      </div>
-      {learningMsg&&<div style={{marginTop:10,fontSize:12,color:T.text3,lineHeight:1.7}}>{learningMsg}</div>}
-    </div>
-    <QuestionBankPanel T={T} learning={learning}/>
 
-    {cand.screening&&(
-      <div style={{...cardSt(T),marginBottom:14}}>
-        <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>AI 录用建议 vs 最终结果（以面试官/总监为准）</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <div style={{padding:"14px",background:T.card2,borderRadius:9,textAlign:"center"}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
-            <div style={{fontSize:16,fontWeight:700,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
-            <div style={{fontSize:28,fontWeight:900,color:scColor(cand.screening.overallScore),marginTop:4}}>{cand.screening.overallScore?.toFixed(1)}</div>
-            {screeningRec && screeningRec!==aiRec && <div style={{fontSize:11,color:T.text4,marginTop:6}}>简历初筛：{screeningRec}</div>}
-          </div>
-          <div style={{padding:"14px",background:T.card2,borderRadius:9,textAlign:"center",border:saved?`2px solid ${verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}`:undefined}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
-            {saved?<div style={{fontSize:16,fontWeight:700,color:verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}}>{verdict}</div>
-            :<div style={{fontSize:13,color:T.text4}}>待填写</div>}
-            {saved&&aiRec&&<div style={{marginTop:8,fontSize:12,fontWeight:700,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 人工判断与AI建议一致":"✗ 以人工判断为准，并记录AI分歧原因"}</div>}
+        <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+          <label style={{...lbSt(T),marginBottom:8}}>我的点评（这将成为 AI 的学习参考）</label>
+          <textarea rows={9} value={reason} onChange={e=>setReason(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.9}}
+            placeholder={"请写出你真正的判断依据。\n建议至少覆盖：\n· 为什么录用/淘汰/待定\n· 现场最打动你的地方\n· 你最不放心的风险点\n· 如果推进，下一步要继续验证什么"} />
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>这段文字会被保存成学习样本，用来校正后续的 AI 录用建议和题库走向。</div>
+            <BtnPrimary T={T} onClick={save} disabled={saving||!verdict||!reason.trim()}>
+              {saving?<Spin text="沉淀学习中..."/>:(saved?"更新判断":"保存判断 · 沉淀为AI参考")}
+            </BtnPrimary>
           </div>
         </div>
-        {gapAnalysis&&<div style={{marginTop:12,padding:"10px 12px",background:match?"#f0fdf4":"#fff7ed",borderRadius:8,borderLeft:`3px solid ${match?"#16a34a":"#ea580c"}`,fontSize:12,color:T.text2,lineHeight:1.8}}>
-          <strong style={{color:match?"#166534":"#9a3412"}}>{gapAnalysis.title}</strong>
-          <div style={{marginTop:4}}>{gapAnalysis.summary}</div>
-          {gapAnalysis.reasons?.length>0&&<div style={{marginTop:8,display:"grid",gap:6}}>
-            {gapAnalysis.reasons.map((item,index)=><div key={index}>• {item}</div>)}
-          </div>}
-        </div>}
       </div>
-    )}
 
-    <SCard T={T} title={saved?"更新我的判断":"填写我的判断"}>
-      <div style={{marginBottom:14}}>
-        <label style={lbSt(T)}>最终决定（以面试官/总监判断为准）</label>
-        <div style={{display:"flex",gap:10}}>
-          {[["录用","#059669","#ecfdf5"],["通过","#2563eb","#eff6ff"],["待定","#ca8a04","#fef9c3"],["淘汰","#dc2626","#fef2f2"]].map(([v,c,bg])=>(
-            <div key={v} onClick={()=>setVerdict(v)}
-              style={{flex:1,padding:"10px",textAlign:"center",borderRadius:9,border:`2px solid ${verdict===v?c:T.border}`,cursor:"pointer",background:verdict===v?bg:T.card2,fontWeight:700,fontSize:14,color:verdict===v?c:T.text3,transition:"all 0.1s"}}>
-              {v}
+      <div style={{display:"grid",gap:16}}>
+        <div style={{...panel,padding:"20px 20px 18px"}}>
+          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:12}}>AI 建议与人工最终结果</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16,textAlign:"center"}}>
+              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
+              <div style={{fontSize:18,fontWeight:800,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
+              <div style={{fontSize:34,fontWeight:950,color:scColor(cand.screening?.overallScore),marginTop:10,lineHeight:1}}>{cand.screening?.overallScore?.toFixed(1)||"—"}</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+              {screeningRec && screeningRec!==aiRec && <div style={{fontSize:11,color:T.text4,marginTop:8}}>简历初筛：{screeningRec}</div>}
             </div>
-          ))}
+            <div style={{padding:"16px 14px",background:T.card2,borderRadius:16,textAlign:"center",border:`2px solid ${saved?(verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"):T.border}`}}>
+              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
+              {saved?<div style={{fontSize:18,fontWeight:800,color:verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}}>{verdict}</div>:<div style={{fontSize:13,color:T.text4}}>待填写</div>}
+              {saved&&aiRec&&<div style={{marginTop:10,fontSize:12,fontWeight:800,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 判断一致":"✗ 以人工判断为准"}</div>}
+            </div>
+          </div>
+
+          {gapAnalysis&&<div style={{marginTop:14,padding:"14px 16px",background:match?"#f0fdf4":"#fff7ed",borderRadius:16,border:`1px solid ${match?"#bbf7d0":"#fed7aa"}`}}>
+            <div style={{fontSize:12,fontWeight:800,color:match?"#166534":"#9a3412",letterSpacing:"0.04em",marginBottom:6}}>{gapAnalysis.title}</div>
+            <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>{gapAnalysis.summary}</div>
+            {gapAnalysis.reasons?.length>0&&<div style={{marginTop:10,display:"grid",gap:6}}>
+              {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
+            </div>}
+          </div>}
+        </div>
+
+        <div style={{...panel,padding:"20px 20px 18px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:10}}>
+            <div>
+              <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>岗位学习状态</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.75}}>
+                当前岗位已沉淀 {Number(learning?.sampleCount)||0} 条学习样本
+                {learning?.rubricVersion?` · 规则 v${learning.rubricVersion}`:" · 暂无规则版本"}
+                {learning?.questionBankVersion?` · 题库 v${learning.questionBankVersion}`:" · 暂无题库版本"}
+              </div>
+            </div>
+            {learningState?.loading&&<Chip c="#2563eb" bg="#eff6ff">学习数据加载中</Chip>}
+            {!learningState?.loading&&learning?.rubricVersion&&<Chip c="#059669" bg="#ecfdf5">已启用学习规则</Chip>}
+          </div>
+          {learningMsg&&<div style={{fontSize:12,color:T.text3,lineHeight:1.75,marginBottom:10}}>{learningMsg}</div>}
+          <div style={{padding:"14px 16px",background:T.navActive,borderRadius:16,border:`1px solid ${T.border}`}}>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.85}}>
+              <strong style={{color:T.text}}>如何让 AI 越来越懂你：</strong><br/>
+              积累 <strong style={{color:T.accent}}>10个以上</strong> 案例后，AI 对你用人偏好的理解会显著提升。不同判断（尤其和 AI 意见不一致的案例）价值最高。
+            </div>
+          </div>
         </div>
       </div>
-      <div style={{marginBottom:14}}>
-        <label style={lbSt(T)}>我的点评（这将成为 AI 的学习参考）</label>
-        <textarea rows={4} value={reason} onChange={e=>setReason(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.7}}
-          placeholder={"简短记录你的核心判断依据...\n例：\n· 执行力强，见过大项目，能快速上手\n· 内容思维好但数据意识不足\n· 稳定性有顾虑但潜力值得冒险"}/>
-      </div>
-      <BtnPrimary T={T} onClick={save} disabled={saving||!verdict||!reason.trim()}>
-        {saving?<Spin text="沉淀学习中..."/>:(saved?"更新判断":"保存判断 · 沉淀为AI参考")}
-      </BtnPrimary>
-      {saved&&<div style={{marginTop:10,fontSize:12,color:T.text3}}>✓ 已保存于 {dir.date}</div>}
-    </SCard>
-
-    <div style={{padding:"12px 14px",background:T.navActive,borderRadius:9,border:`1px solid ${T.border}`}}>
-      <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>
-        <strong style={{color:T.text}}>💡 如何让 AI 越来越懂你：</strong><br/>
-        积累 <strong style={{color:T.accent}}>10个以上</strong> 案例后，AI 对你用人偏好的理解会显著提升。<br/>
-        不同判断（与AI意见相左）的案例尤其有价值。
-      </div>
     </div>
+
+    <QuestionBankPanel T={T} learning={learning}/>
   </div>);
 }
 
@@ -5187,43 +5372,69 @@ function ResultTab({T,cand}) {
     ...cand,
     screening:{...(cand.screening||{}),recommendation:aiRec}
   });
+  const panel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+  };
   return(<div>
-    <div style={{...cardSt(T),borderLeft:`4px solid ${humanVerdict?humanChip.c:aiChip.c}`,marginBottom:14}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-        <div>
-          <div style={{fontSize:15,fontWeight:700,color:T.text,marginBottom:4}}>评估结果总览</div>
-          <div style={{fontSize:13,color:T.text2}}>完成 {ivs.length} 轮面试 · AI 最终评分 <strong style={{color:scColor(lat.assessment.score)}}>{lat.assessment.score?.toFixed(1)}/5.0</strong></div>
-          <div style={{fontSize:13,color:T.text3,marginTop:4}}>{lat.assessment.suggestion}</div>
+    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(320px,0.85fr)",gap:16,alignItems:"start",marginBottom:16}}>
+      <div style={{...panel,padding:"20px 22px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>评估结果总览</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75}}>完成 {ivs.length} 轮面试后，系统会把面试评估、人工判断和分歧点收在这里，方便你最后回看。</div>
+          </div>
+          <div style={{padding:"12px 14px",borderRadius:16,background:T.card2,border:`1px solid ${T.border}`,minWidth:180}}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>AI 最终评分</div>
+            <div style={{fontSize:34,fontWeight:950,color:scColor(lat.assessment.score),lineHeight:1}}>{lat.assessment.score?.toFixed(1)}</div>
+            <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+          </div>
         </div>
-        <div style={{display:"grid",gap:8,justifyItems:"end"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:12,color:T.text4}}>AI 录用建议</span>
+        <div style={{fontSize:13,color:T.text2,lineHeight:1.85}}>{lat.assessment.suggestion}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginTop:16}}>
+          <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
+            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
             <Chip c={aiChip.c} bg={aiChip.bg} lg>{aiRec}</Chip>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:12,color:T.text4}}>最终结果（面试官/总监）</span>
+          <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
+            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
             <Chip c={humanVerdict?humanChip.c:T.text4} bg={humanVerdict?humanChip.bg:T.card2} lg>{humanVerdict||"待面试官/总监确认"}</Chip>
           </div>
         </div>
       </div>
-    </div>
-    {gapAnalysis&&<div style={{...cardSt(T),marginBottom:14,borderLeft:`4px solid ${gapAnalysis.same?"#16a34a":"#ea580c"}`}}>
-      <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:6}}>
-        {gapAnalysis.same?"AI 与人工判断一致":"AI 与人工判断不一致，需回看分歧原因"}
+      <div style={{...panel,padding:"20px 20px 18px",borderLeft:`4px solid ${gapAnalysis?(gapAnalysis.same?"#16a34a":"#ea580c"):T.border}`}}>
+        <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:8}}>
+          {gapAnalysis?(gapAnalysis.same?"AI 与人工判断一致":"AI 与人工判断不一致"):"等待人工判断"}
+        </div>
+        <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>
+          {gapAnalysis?gapAnalysis.summary:"总监/面试官给出最终结论后，这里会自动生成分歧分析，解释为什么 AI 和人工会一致或不一致。"}
+        </div>
+        {gapAnalysis?.reasons?.length>0&&<div style={{marginTop:12,display:"grid",gap:6}}>
+          {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
+        </div>}
       </div>
-      <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}>{gapAnalysis.summary}</div>
-      {gapAnalysis.reasons?.length>0&&<div style={{marginTop:8,display:"grid",gap:6}}>
-        {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2}}>• {item}</div>)}
-      </div>}
-    </div>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:12}}>
+    </div>
+    <div style={{fontSize:12,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>轮次回放</div>
+    <div style={{display:"grid",gap:12}}>
       {ivs.map((ir,i)=>{
         const dc=ir.assessment.decision==="通过"?{c:"#16a34a",bg:"#dcfce7"}:ir.assessment.decision==="淘汰"?{c:"#dc2626",bg:"#fee2e2"}:{c:"#ca8a04",bg:"#fef9c3"};
-        return(<div key={i} style={{...cardSt(T),borderTop:`3px solid ${dc.c}`}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}><span style={{fontWeight:700,color:T.text}}>{ir.round}</span><Chip c={dc.c} bg={dc.bg}>{ir.assessment.decision}</Chip></div>
-          <div style={{fontSize:26,fontWeight:900,color:scColor(ir.assessment.score)}}>{ir.assessment.score?.toFixed(1)}</div>
-          <div style={{fontSize:11,color:T.text4,marginBottom:6}}>/ 5.0 · {ir.date}</div>
-          <div style={{fontSize:12,color:T.text2}}>{ir.assessment.suggestion}</div>
+        return(<div key={i} style={{...panel,padding:"18px 20px 16px",borderLeft:`4px solid ${dc.c}`}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:16,alignItems:"center"}}>
+            <div>
+              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
+                <span style={{fontWeight:850,color:T.text,fontSize:14}}>{ir.round}</span>
+                <Chip c={dc.c} bg={dc.bg}>{ir.assessment.decision}</Chip>
+                <span style={{fontSize:11,color:T.text4}}>{ir.date}</span>
+              </div>
+              <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}>{ir.assessment.suggestion}</div>
+            </div>
+            <div style={{textAlign:"right",minWidth:100}}>
+              <div style={{fontSize:28,fontWeight:950,color:scColor(ir.assessment.score),lineHeight:1}}>{ir.assessment.score?.toFixed(1)}</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+            </div>
+          </div>
         </div>);
       })}
     </div>
@@ -5262,224 +5473,263 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   const dayTotals=days.map(d=>({date:d,tokens:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.calls,0)}));
   const maxT=Math.max(...dayTotals.map(d=>d.tokens),1);
   const total={tokens:usageLogs.reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.reduce((s,r)=>s+r.calls,0)};
+  const settingsShell={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:CARD_RADIUS,
+    boxShadow:SOFT_SHADOW,
+  };
+  const settingsPanel={...settingsShell,padding:"20px 22px"};
+  const systemSummaryCards=[
+    {label:"调用模式",value:usingProxy?"后端代理":"浏览器直连",tone:usingProxy?"#2563eb":"#ca8a04"},
+    {label:"云端同步",value:cloudLabel,tone:cloudTone.c},
+    {label:"已连接模型",value:`${connectedProviders.length} 个`,tone:connectedProviders.length?"#059669":"#dc2626"},
+  ];
 
   return(<Page T={T} title="设置" sub="配置 API 密钥、AI 模型与界面偏好">
-    <div style={{maxWidth:820}}>
-      <SecLabel T={T}>调用方式</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:22}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          {[["proxy","后端代理","推荐：浏览器不直接暴露模型密钥"],["direct","浏览器直连","仅适合本地临时调试"]].map(([id,title,desc])=>(
-            <div key={id} onClick={()=>setCfg(p=>normalizeCfg({...p,mode:id}))}
-              style={{padding:"14px 16px",border:`2px solid ${cfg.mode===id?T.accent:T.border}`,borderRadius:10,cursor:"pointer",background:cfg.mode===id?`${T.accent}10`:T.card2}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <span style={{fontSize:14,fontWeight:800,color:T.text}}>{title}</span>
-                {cfg.mode===id&&<span style={{fontSize:12,color:T.accent,fontWeight:700}}>✓</span>}
-              </div>
-              <div style={{fontSize:12,color:T.text3,lineHeight:1.6}}>{desc}</div>
+    <div style={{display:"grid",gridTemplateColumns:"minmax(0,0.95fr) minmax(360px,1.05fr)",gap:18,alignItems:"start"}}>
+      <div style={{display:"grid",gap:18}}>
+        <div style={{...settingsShell,padding:"18px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:18,flexWrap:"wrap"}}>
+            <div style={{flex:"1 1 420px",minWidth:0}}>
+              <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>系统与模型控制台</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>把模型连通、云端同步、主题风格和日常用量收进一个控制台里。上面看系统健康度，下面再处理具体配置，避免设置页也变成很多等权重的小卡片。</div>
             </div>
-          ))}
-        </div>
-        {usingProxy&&<>
-          <Inp T={T} label="代理地址" placeholder="http://localhost:8787/api/ai" value={cfg.proxyUrl||""} onChange={e=>setCfg(p=>normalizeCfg({...p,proxyUrl:e.target.value}))}/>
-          <Inp T={T} label="代理访问令牌（可选）" placeholder="留空表示不校验" value={cfg.proxyToken||""} onChange={e=>setCfg(p=>normalizeCfg({...p,proxyToken:e.target.value}))}/>
-          <div style={{fontSize:12,color:T.text3,lineHeight:1.7,padding:"10px 12px",background:T.card2,borderRadius:8,border:`1px solid ${T.border}`}}>
-            当前为代理模式：前端只发送 `provider / model / prompt` 到你的服务端，真正的模型 API Key 保存在服务端环境变量里。
-          </div>
-        </>}
-      </div>
-
-      <SecLabel T={T}>云端数据库</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:22}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:800,color:T.text}}>Cloudflare D1 同步状态</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:4}}>岗位、候选人、面试记录和调用统计会自动同步到云端，同时保留浏览器本地缓存兜底。</div>
-          </div>
-          <Chip c={cloudTone.c} bg={cloudTone.bg}>{cloudLabel}</Chip>
-        </div>
-        <div style={{fontSize:12,color:T.text2,lineHeight:1.8,padding:"10px 12px",background:T.card2,borderRadius:8,border:`1px solid ${T.border}`}}>
-          <div>{cloud?.message||"等待云端同步状态..."}</div>
-          {cloud?.updatedAt&&<div style={{marginTop:6,color:T.text4}}>最近成功同步：{fmtCloudTime(cloud.updatedAt)}</div>}
-          <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 里的数据；但如果你清浏览器缓存，只会丢本地副本，不会影响云端主数据。</div>
-          <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。当前同步采用整库快照，多人同时改动时以后保存的内容会覆盖之前的保存。</div>
-        </div>
-      </div>
-
-      <SecLabel T={T}>AI 模型配置</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:18}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:14,fontWeight:800,color:T.text}}>后台模型状态</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:4}}>设置页每次打开都会自动检测后台环境变量，告诉你哪些模型已连通、哪些还没配置。</div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            {modelStatus.checkedAt&&<span style={{fontSize:11,color:T.text4}}>最近检查：{fmtCloudTime(modelStatus.checkedAt)}</span>}
-            <button
-              onClick={reloadModelStatus}
-              style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700}}
-            >
-              {modelStatus.loading?"检测中...":"重新检测"}
-            </button>
-          </div>
-        </div>
-        {modelStatus.error
-          ?<div style={{fontSize:12,color:"#b91c1c",padding:"10px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,lineHeight:1.7}}>{modelStatus.error}</div>
-          :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10}}>
-            {providerEntries.map(([pid,prov])=>{
-              const statusItem=modelStatus.providers.find(item=>item.id===pid);
-              const connected=!!statusItem?.configured;
-              const tone=connected?{c:"#059669",bg:"#ecfdf5",dot:"#10b981"}:{c:"#dc2626",bg:"#fef2f2",dot:"#ef4444"};
-              return(
-                <div key={pid} style={{padding:"14px 14px 12px",background:connected?tone.bg:T.card2,border:`1px solid ${connected?"#bbf7d0":T.border}`,borderRadius:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
-                      <div style={{width:10,height:10,borderRadius:999,background:tone.dot,flexShrink:0}}/>
-                      <div style={{fontSize:13,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prov.name}</div>
-                    </div>
-                    <Chip c={tone.c} bg={connected?tone.bg:"#fef2f2"}>{connected?"已连接":"未连接"}</Chip>
-                  </div>
-                  <div style={{fontSize:11,color:T.text3,lineHeight:1.7}}>{statusItem?.message || "尚未检测到该模型状态"}</div>
-                  <div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>{statusItem?.tip || "配置好服务端环境变量后即可在代理模式下使用"}</div>
-                </div>
-              );
-            })}
-          </div>}
-        <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>
-          {usingProxy
-            ?"当前为后端代理模式，以上状态来自服务端环境变量探测。"
-            :"当前为浏览器直连模式，后台模型状态仅供参考；真正调用仍取决于你在前端保存的 API Key。"}
-        </div>
-      </div>
-      {usingProxy&&firstConnectedProvider&&<div style={{fontSize:12,color:T.text3,margin:"-4px 0 14px",lineHeight:1.7}}>
-        代理模式下会默认选择已连接模型，当前优先供应商为 <span style={{fontWeight:800,color:T.text}}>{PROVIDERS[firstConnectedProvider.id]?.name||firstConnectedProvider.id}</span>。
-      </div>}
-      <div style={{display:"grid",gap:12,marginBottom:24}}>
-        {providerEntries.map(([pid,prov])=>{
-          const isActive=cfg.provider===pid;
-          const providerState=providerStatusMap[pid];
-          const isConnected=!!providerState?.configured;
-          const selectionDisabled=usingProxy && !isConnected;
-          return(<div key={pid} style={{background:T.surface,border:`2px solid ${isActive?prov.color:T.border}`,borderRadius:12,padding:"16px 18px",transition:"border 0.15s"}}>
-            <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
-              <div style={{width:32,height:32,borderRadius:7,background:prov.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,flexShrink:0}}>{prov.logo}</div>
-              <div style={{flex:1}}><div style={{fontSize:14,fontWeight:800,color:T.text}}>{prov.name}</div><div style={{fontSize:11,color:T.text4}}>{prov.models.length} 个可用模型</div></div>
-              {isActive&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:`${prov.color}18`,color:prov.color,borderRadius:20}}>当前使用</span>}
-              {usingProxy&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:isConnected?"#ecfdf5":"#fef2f2",color:isConnected?"#059669":"#dc2626",borderRadius:20}}>{isConnected?"已连接":"未连接"}</span>}
-            </div>
-            {!usingProxy
-              ?<div style={{marginBottom:11}}>
-                <label style={lbSt(T)}>API Key</label>
-                <div style={{display:"flex",gap:7}}>
-                  <input type="password" value={keys[pid]||""} onChange={e=>setKeys(p=>({...p,[pid]:e.target.value}))} placeholder={prov.keyPlaceholder} style={{...inSt(T),flex:1,fontSize:12}}/>
-                  <button onClick={()=>saveKey(pid)} style={{padding:"7px 13px",background:saved===pid?"#059669":prov.color,color:"#fff",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0,minWidth:56,transition:"background 0.2s"}}>{saved===pid?"✓":"保存"}</button>
-                </div>
-              </div>
-              :<div style={{marginBottom:11,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:12,color:T.text3,lineHeight:1.6}}>
-                {providerState?.message || "代理模式下，此供应商的 API Key 由服务端环境变量提供，前端不再保存密钥。"}
-              </div>}
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>
-              {prov.models.map(m=>{
-                const isSel=isActive&&cfg.model===m.id;
-                return(<div key={m.id} onClick={()=>{if(selectionDisabled) return;setCfg(p=>({...p,provider:pid,model:m.id}));}}
-                  style={{padding:"8px 10px",border:`1.5px solid ${isSel?prov.color:T.border}`,borderRadius:8,cursor:selectionDisabled?"not-allowed":"pointer",background:isSel?`${prov.color}10`:T.card2,transition:"all 0.1s",opacity:selectionDisabled?0.45:1}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:700,color:T.text}}>{m.name}</span>{isSel&&<span style={{color:prov.color,fontSize:11}}>✓</span>}</div>
-                  <div style={{fontSize:11,color:T.text3}}>{m.note}</div>
-                  {prov.pricing?.[m.id]&&<div style={{fontSize:10,color:T.text4,marginTop:2}}>${prov.pricing[m.id].in}/${prov.pricing[m.id].out}/M</div>}
-                </div>);
-              })}
-            </div>
-            {usingProxy&&selectionDisabled&&<div style={{fontSize:11,color:"#dc2626",marginTop:8,lineHeight:1.7}}>当前后台还没连通这个供应商，代理模式下默认不会切到它。请先配置对应环境变量，再点上方“重新检测”。</div>}
-          </div>);
-        })}
-      </div>
-
-      <SecLabel T={T}>界面风格</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:22}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
-          {THEMES.map(t=>{
-            const th=getTheme(t.id);
-            return(<div key={t.id} onClick={()=>setCfg(p=>({...p,theme:t.id}))} style={{border:`2px solid ${cfg.theme===t.id?T.accent:T.border}`,borderRadius:9,overflow:"hidden",cursor:"pointer",transition:"border 0.15s"}}>
-              <div style={{height:48,background:th.bg,padding:8,display:"flex",flexDirection:"column",gap:3}}>
-                <div style={{height:7,width:"55%",background:th.surface,borderRadius:2,border:`1px solid ${th.border}`}}/>
-                <div style={{display:"flex",gap:3}}><div style={{height:6,width:"27%",background:th.accent,borderRadius:2,opacity:0.85}}/><div style={{height:6,width:"37%",background:th.border2,borderRadius:2}}/></div>
-                <div style={{height:4,width:"72%",background:th.border,borderRadius:2}}/>
-              </div>
-              <div style={{padding:"6px 9px",background:T.surface,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:12,fontWeight:600,color:T.text}}>{t.name}</span>
-                {cfg.theme===t.id&&<span style={{color:T.accent,fontSize:12}}>✓</span>}
-              </div>
-            </div>);
-          })}
-        </div>
-      </div>
-
-      <SecLabel T={T}>总监判断沉淀 · AI准确率追踪</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px",marginBottom:22}}>
-        {accuracy.length===0
-          ?<div style={{textAlign:"center",padding:"28px",color:T.text4,fontSize:13}}>暂无判断记录，在候选人的「④ 总监判断」中填写后自动追踪</div>
-          :<>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
-              {[{label:"已沉淀案例",val:dirStats.total,color:T.accent},{label:"AI判断一致",val:dirStats.match,color:"#16a34a"},{label:"AI匹配率",val:`${dirStats.rate}%`,color:dirStats.rate>=70?"#16a34a":dirStats.rate>=50?"#ca8a04":"#dc2626"}].map(s=>(
-                <div key={s.label} style={{padding:"14px",background:T.card2,borderRadius:9,border:`1px solid ${T.border}`,textAlign:"center"}}>
-                  <div style={{fontSize:26,fontWeight:900,color:s.color}}>{s.val}</div>
-                  <div style={{fontSize:12,color:T.text4,marginTop:3}}>{s.label}</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(112px,1fr))",gap:10,minWidth:340,flex:"0 0 380px"}}>
+              {systemSummaryCards.map(item=>(
+                <div key={item.label} style={{padding:"12px 12px 10px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{item.label}</div>
+                  <div style={{fontSize:18,fontWeight:900,color:item.tone,marginTop:8,lineHeight:1.2}}>{item.value}</div>
                 </div>
               ))}
             </div>
-            <div style={{height:4,background:T.border,borderRadius:2,marginBottom:18}}>
-              <div style={{width:`${dirStats.rate}%`,height:"100%",background:dirStats.rate>=70?"#16a34a":dirStats.rate>=50?"#ca8a04":"#6366f1",borderRadius:2,transition:"width 0.5s"}}/>
-            </div>
-            <div style={{border:`1px solid ${T.border}`,borderRadius:9,overflow:"hidden"}}>
-              <div style={{display:"grid",gridTemplateColumns:"1.5fr 1.5fr 1fr 1fr 1fr",padding:"8px 12px",background:T.card2,fontSize:11,fontWeight:700,color:T.text4,borderBottom:`1px solid ${T.border}`}}>
-                <span>候选人</span><span>岗位</span><span>AI建议</span><span>总监判断</span><span style={{textAlign:"center"}}>一致</span>
-              </div>
-              {accuracy.slice().reverse().map((a,i)=>(
-                <div key={i} style={{display:"grid",gridTemplateColumns:"1.5fr 1.5fr 1fr 1fr 1fr",padding:"9px 12px",fontSize:12,color:T.text2,borderBottom:i<accuracy.length-1?`1px solid ${T.border}`:"none",alignItems:"center"}}>
-                  <span style={{fontWeight:600}}>{a.name}</span>
-                  <span style={{color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.job}</span>
-                  <Chip c={recSt(a.aiRec).c} bg={recSt(a.aiRec).bg}>{a.aiRec?.replace("建议","")}</Chip>
-                  <span style={{fontWeight:700,color:a.dir==="录用"?"#059669":a.dir==="淘汰"?"#dc2626":"#ca8a04"}}>{a.dir}</span>
-                  <span style={{textAlign:"center",fontSize:16}}>{a.match?"✅":"❌"}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        }
-      </div>
-
-      <SecLabel T={T}>用量统计（近14天）</SecLabel>
-      <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:12,padding:"16px 18px"}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12,marginBottom:16}}>
-          {[{label:"总调用次数",val:total.calls,color:T.accent},{label:"总 Token",val:fmt(total.tokens),color:"#7c3aed"}].map(s=>(
-            <div key={s.label} style={{padding:"12px",background:T.card2,borderRadius:8,border:`1px solid ${T.border}`,textAlign:"center"}}>
-              <div style={{fontSize:24,fontWeight:800,color:s.color}}>{s.val}</div>
-              <div style={{fontSize:11,color:T.text4,marginTop:2}}>{s.label}</div>
-            </div>
-          ))}
+          </div>
         </div>
-        {dayTotals.length>0?(<>
-          <div style={{fontSize:12,fontWeight:600,color:T.text3,marginBottom:9}}>每日 Token 用量</div>
-          <div style={{display:"flex",gap:3,alignItems:"flex-end",height:80,marginBottom:22}}>
-            {dayTotals.map(d=>{
-              const h=Math.max((d.tokens/maxT)*66,2);
-              const isT=d.date===todayStr();
-              return(<div key={d.date} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                <div title={`${d.date}: ${fmt(d.tokens)} tokens, ${d.calls}次`} style={{width:"100%",borderRadius:"2px 2px 0 0",background:isT?T.accent:T.border2,height:`${h}px`,opacity:0.85,cursor:"help"}}/>
-                <div style={{fontSize:9,color:T.text4,transform:"rotate(-45deg)",transformOrigin:"top center",whiteSpace:"nowrap"}}>{d.date.slice(5)}</div>
+
+        <div style={settingsPanel}>
+          <SecLabel T={T}>系统接入</SecLabel>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            {[["proxy","后端代理","推荐：浏览器不直接暴露模型密钥"],["direct","浏览器直连","仅适合本地临时调试"]].map(([id,title,desc])=>(
+              <div key={id} onClick={()=>setCfg(p=>normalizeCfg({...p,mode:id}))}
+                style={{padding:"14px 16px",border:`2px solid ${cfg.mode===id?T.accent:T.border}`,borderRadius:14,cursor:"pointer",background:cfg.mode===id?`${T.accent}10`:"#fbfcfe",boxShadow:cfg.mode===id?"0 12px 24px rgba(15,23,42,0.06)":"none"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:14,fontWeight:800,color:T.text}}>{title}</span>
+                  {cfg.mode===id&&<span style={{fontSize:12,color:T.accent,fontWeight:700}}>✓</span>}
+                </div>
+                <div style={{fontSize:12,color:T.text3,lineHeight:1.7}}>{desc}</div>
+              </div>
+            ))}
+          </div>
+          {usingProxy&&<>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <Inp T={T} label="代理地址" placeholder="http://localhost:8787/api/ai" value={cfg.proxyUrl||""} onChange={e=>setCfg(p=>normalizeCfg({...p,proxyUrl:e.target.value}))}/>
+              <Inp T={T} label="代理访问令牌（可选）" placeholder="留空表示不校验" value={cfg.proxyToken||""} onChange={e=>setCfg(p=>normalizeCfg({...p,proxyToken:e.target.value}))}/>
+            </div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.7,padding:"12px 14px",background:"#f8fafc",borderRadius:12,border:`1px solid ${T.border}`}}>
+              当前为代理模式：前端只发送 `provider / model / prompt` 到你的服务端，真正的模型 API Key 保存在服务端环境变量里。
+            </div>
+          </>}
+          <div style={{marginTop:14,padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:800,color:T.text}}>Cloudflare D1 同步状态</div>
+                <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>岗位、候选人、面试记录和调用统计会自动同步到云端，同时保留浏览器本地缓存兜底。</div>
+              </div>
+              <Chip c={cloudTone.c} bg={cloudTone.bg}>{cloudLabel}</Chip>
+            </div>
+            <div style={{fontSize:12,color:T.text2,lineHeight:1.8,padding:"10px 12px",background:T.card2,borderRadius:10,border:`1px solid ${T.border}`}}>
+              <div>{cloud?.message||"等待云端同步状态..."}</div>
+              {cloud?.updatedAt&&<div style={{marginTop:6,color:T.text4}}>最近成功同步：{fmtCloudTime(cloud.updatedAt)}</div>}
+              <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 里的数据；但如果你清浏览器缓存，只会丢本地副本，不会影响云端主数据。</div>
+              <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。当前同步采用整库快照，多人同时改动时以后保存的内容会覆盖之前的保存。</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={settingsPanel}>
+          <SecLabel T={T}>界面风格</SecLabel>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+            {THEMES.map(t=>{
+              const th=getTheme(t.id);
+              return(<div key={t.id} onClick={()=>setCfg(p=>({...p,theme:t.id}))} style={{border:`2px solid ${cfg.theme===t.id?T.accent:T.border}`,borderRadius:14,overflow:"hidden",cursor:"pointer",transition:"border 0.15s, transform 0.15s",background:"#ffffff"}}>
+                <div style={{height:56,background:th.bg,padding:10,display:"flex",flexDirection:"column",gap:4}}>
+                  <div style={{height:8,width:"55%",background:th.surface,borderRadius:3,border:`1px solid ${th.border}`}}/>
+                  <div style={{display:"flex",gap:4}}><div style={{height:7,width:"27%",background:th.accent,borderRadius:3,opacity:0.85}}/><div style={{height:7,width:"37%",background:th.border2,borderRadius:3}}/></div>
+                  <div style={{height:4,width:"72%",background:th.border,borderRadius:3}}/>
+                </div>
+                <div style={{padding:"8px 10px",background:T.surface,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>{t.name}</span>
+                  {cfg.theme===t.id&&<span style={{color:T.accent,fontSize:12}}>✓</span>}
+                </div>
               </div>);
             })}
           </div>
-          {(()=>{
-            const todayLogs=usageLogs.filter(r=>r.date===todayStr());
-            return todayLogs.length>0?(<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {todayLogs.map((r,i)=>{const p=PROVIDERS[r.provider];return p?(<div key={i} style={{padding:"7px 11px",background:T.card2,border:`1px solid ${T.border}`,borderLeft:`3px solid ${p.color}`,borderRadius:7,fontSize:12}}>
-                <span style={{fontWeight:700,color:p.color}}>{p.name}</span>
-                <span style={{color:T.text3,marginLeft:7}}>{fmt(r.input+r.output)} tokens</span>
-                <span style={{color:T.text4,marginLeft:5}}>{r.calls}次</span>
-              </div>):null;})}
-            </div>):null;
-          })()}
-        </>):<div style={{textAlign:"center",padding:"28px",color:T.text4,fontSize:13}}>暂无使用记录</div>}
+        </div>
+      </div>
+
+      <div style={{display:"grid",gap:18}}>
+        <div style={settingsPanel}>
+          <SecLabel T={T}>模型控制台</SecLabel>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:800,color:T.text}}>后台模型状态</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:4}}>设置页每次打开都会自动检测后台环境变量，告诉你哪些模型已连通、哪些还没配置。</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {modelStatus.checkedAt&&<span style={{fontSize:11,color:T.text4}}>最近检查：{fmtCloudTime(modelStatus.checkedAt)}</span>}
+              <button
+                onClick={reloadModelStatus}
+                style={{padding:"8px 12px",background:T.card2,color:T.text3,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:700}}
+              >
+                {modelStatus.loading?"检测中...":"重新检测"}
+              </button>
+            </div>
+          </div>
+          {modelStatus.error
+            ?<div style={{fontSize:12,color:"#b91c1c",padding:"10px 12px",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,lineHeight:1.7}}>{modelStatus.error}</div>
+            :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(220px,1fr))",gap:10,marginBottom:12}}>
+              {providerEntries.map(([pid,prov])=>{
+                const statusItem=modelStatus.providers.find(item=>item.id===pid);
+                const connected=!!statusItem?.configured;
+                const tone=connected?{c:"#059669",bg:"#ecfdf5",dot:"#10b981"}:{c:"#dc2626",bg:"#fef2f2",dot:"#ef4444"};
+                return(
+                  <div key={pid} style={{padding:"14px 14px 12px",background:connected?tone.bg:"#fbfcfe",border:`1px solid ${connected?"#bbf7d0":T.border}`,borderRadius:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+                        <div style={{width:10,height:10,borderRadius:999,background:tone.dot,flexShrink:0}}/>
+                        <div style={{fontSize:13,fontWeight:800,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{prov.name}</div>
+                      </div>
+                      <Chip c={tone.c} bg={connected?tone.bg:"#fef2f2"}>{connected?"已连接":"未连接"}</Chip>
+                    </div>
+                    <div style={{fontSize:11,color:T.text3,lineHeight:1.7}}>{statusItem?.message || "尚未检测到该模型状态"}</div>
+                    <div style={{fontSize:11,color:T.text4,marginTop:6,lineHeight:1.6}}>{statusItem?.tip || "配置好服务端环境变量后即可在代理模式下使用"}</div>
+                  </div>
+                );
+              })}
+            </div>}
+          <div style={{fontSize:11,color:T.text4,marginBottom:12,lineHeight:1.7}}>
+            {usingProxy
+              ?"当前为后端代理模式，以上状态来自服务端环境变量探测。"
+              :"当前为浏览器直连模式，后台模型状态仅供参考；真正调用仍取决于你在前端保存的 API Key。"}
+          </div>
+          {usingProxy&&firstConnectedProvider&&<div style={{fontSize:12,color:T.text3,marginBottom:14,lineHeight:1.7}}>
+            代理模式下会默认选择已连接模型，当前优先供应商为 <span style={{fontWeight:800,color:T.text}}>{PROVIDERS[firstConnectedProvider.id]?.name||firstConnectedProvider.id}</span>。
+          </div>}
+          <div style={{display:"grid",gap:12}}>
+            {providerEntries.map(([pid,prov])=>{
+              const isActive=cfg.provider===pid;
+              const providerState=providerStatusMap[pid];
+              const isConnected=!!providerState?.configured;
+              const selectionDisabled=usingProxy && !isConnected;
+              return(<div key={pid} style={{background:isActive?`${prov.color}08`:"#ffffff",border:`2px solid ${isActive?prov.color:T.border}`,borderRadius:16,padding:"16px 18px",transition:"border 0.15s"}}>
+                <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:12}}>
+                  <div style={{width:34,height:34,borderRadius:10,background:prov.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,flexShrink:0}}>{prov.logo}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:800,color:T.text}}>{prov.name}</div>
+                    <div style={{fontSize:11,color:T.text4}}>{prov.models.length} 个可用模型</div>
+                  </div>
+                  {isActive&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:`${prov.color}18`,color:prov.color,borderRadius:20}}>当前使用</span>}
+                  {usingProxy&&<span style={{fontSize:11,fontWeight:700,padding:"3px 9px",background:isConnected?"#ecfdf5":"#fef2f2",color:isConnected?"#059669":"#dc2626",borderRadius:20}}>{isConnected?"已连接":"未连接"}</span>}
+                </div>
+                {!usingProxy
+                  ?<div style={{marginBottom:11}}>
+                    <label style={lbSt(T)}>API Key</label>
+                    <div style={{display:"flex",gap:7}}>
+                      <input type="password" value={keys[pid]||""} onChange={e=>setKeys(p=>({...p,[pid]:e.target.value}))} placeholder={prov.keyPlaceholder} style={{...inSt(T),flex:1,fontSize:12}}/>
+                      <button onClick={()=>saveKey(pid)} style={{padding:"7px 13px",background:saved===pid?"#059669":prov.color,color:"#fff",border:"none",borderRadius:10,fontSize:12,fontWeight:700,cursor:"pointer",flexShrink:0,minWidth:56,transition:"background 0.2s"}}>{saved===pid?"✓":"保存"}</button>
+                    </div>
+                  </div>
+                  :<div style={{marginBottom:11,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10,fontSize:12,color:T.text3,lineHeight:1.6}}>
+                    {providerState?.message || "代理模式下，此供应商的 API Key 由服务端环境变量提供，前端不再保存密钥。"}
+                  </div>}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                  {prov.models.map(m=>{
+                    const isSel=isActive&&cfg.model===m.id;
+                    return(<div key={m.id} onClick={()=>{if(selectionDisabled) return;setCfg(p=>({...p,provider:pid,model:m.id}));}}
+                      style={{padding:"9px 10px",border:`1.5px solid ${isSel?prov.color:T.border}`,borderRadius:10,cursor:selectionDisabled?"not-allowed":"pointer",background:isSel?`${prov.color}10`:T.card2,transition:"all 0.1s",opacity:selectionDisabled?0.45:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:12,fontWeight:700,color:T.text}}>{m.name}</span>{isSel&&<span style={{color:prov.color,fontSize:11}}>✓</span>}</div>
+                      <div style={{fontSize:11,color:T.text3,lineHeight:1.6}}>{m.note}</div>
+                      {prov.pricing?.[m.id]&&<div style={{fontSize:10,color:T.text4,marginTop:2}}>${prov.pricing[m.id].in}/${prov.pricing[m.id].out}/M</div>}
+                    </div>);
+                  })}
+                </div>
+                {usingProxy&&selectionDisabled&&<div style={{fontSize:11,color:"#dc2626",marginTop:8,lineHeight:1.7}}>当前后台还没连通这个供应商，代理模式下默认不会切到它。请先配置对应环境变量，再点上方“重新检测”。</div>}
+              </div>);
+            })}
+          </div>
+        </div>
+
+        <div style={settingsPanel}>
+          <SecLabel T={T}>总监沉淀与用量</SecLabel>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr)",gap:18}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:10}}>总监判断沉淀 · AI准确率追踪</div>
+              {accuracy.length===0
+                ?<div style={{textAlign:"center",padding:"28px",color:T.text4,fontSize:13,background:"#fbfcfe",border:`1px solid ${T.border}`,borderRadius:14}}>暂无判断记录，在候选人的「④ 总监判断」中填写后自动追踪</div>
+                :<>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+                    {[{label:"已沉淀案例",val:dirStats.total,color:T.accent},{label:"AI判断一致",val:dirStats.match,color:"#16a34a"},{label:"AI匹配率",val:`${dirStats.rate}%`,color:dirStats.rate>=70?"#16a34a":dirStats.rate>=50?"#ca8a04":"#dc2626"}].map(s=>(
+                      <div key={s.label} style={{padding:"14px",background:T.card2,borderRadius:12,border:`1px solid ${T.border}`,textAlign:"center"}}>
+                        <div style={{fontSize:26,fontWeight:900,color:s.color}}>{s.val}</div>
+                        <div style={{fontSize:12,color:T.text4,marginTop:3}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{height:5,background:T.border,borderRadius:999,marginBottom:16}}>
+                    <div style={{width:`${dirStats.rate}%`,height:"100%",background:dirStats.rate>=70?"#16a34a":dirStats.rate>=50?"#ca8a04":"#6366f1",borderRadius:999,transition:"width 0.5s"}}/>
+                  </div>
+                  <div style={{border:`1px solid ${T.border}`,borderRadius:14,overflow:"hidden"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1.5fr 1.5fr 1fr 1fr 1fr",padding:"10px 12px",background:T.card2,fontSize:11,fontWeight:700,color:T.text4,borderBottom:`1px solid ${T.border}`}}>
+                      <span>候选人</span><span>岗位</span><span>AI建议</span><span>总监判断</span><span style={{textAlign:"center"}}>一致</span>
+                    </div>
+                    {accuracy.slice().reverse().map((a,i)=>(
+                      <div key={i} style={{display:"grid",gridTemplateColumns:"1.5fr 1.5fr 1fr 1fr 1fr",padding:"10px 12px",fontSize:12,color:T.text2,borderBottom:i<accuracy.length-1?`1px solid ${T.border}`:"none",alignItems:"center"}}>
+                        <span style={{fontWeight:600}}>{a.name}</span>
+                        <span style={{color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.job}</span>
+                        <Chip c={recSt(a.aiRec).c} bg={recSt(a.aiRec).bg}>{a.aiRec?.replace("建议","")}</Chip>
+                        <span style={{fontWeight:700,color:a.dir==="录用"?"#059669":a.dir==="淘汰"?"#dc2626":"#ca8a04"}}>{a.dir}</span>
+                        <span style={{textAlign:"center",fontSize:16}}>{a.match?"✅":"❌"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>}
+            </div>
+            <div>
+              <div style={{fontSize:14,fontWeight:800,color:T.text,marginBottom:10}}>用量统计（近14天）</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:12,marginBottom:16}}>
+                {[{label:"总调用次数",val:total.calls,color:T.accent},{label:"总 Token",val:fmt(total.tokens),color:"#7c3aed"}].map(s=>(
+                  <div key={s.label} style={{padding:"12px",background:T.card2,borderRadius:12,border:`1px solid ${T.border}`,textAlign:"center"}}>
+                    <div style={{fontSize:24,fontWeight:800,color:s.color}}>{s.val}</div>
+                    <div style={{fontSize:11,color:T.text4,marginTop:2}}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              {dayTotals.length>0?(<>
+                <div style={{fontSize:12,fontWeight:600,color:T.text3,marginBottom:9}}>每日 Token 用量</div>
+                <div style={{display:"flex",gap:3,alignItems:"flex-end",height:80,marginBottom:22}}>
+                  {dayTotals.map(d=>{
+                    const h=Math.max((d.tokens/maxT)*66,2);
+                    const isT=d.date===todayStr();
+                    return(<div key={d.date} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                      <div title={`${d.date}: ${fmt(d.tokens)} tokens, ${d.calls}次`} style={{width:"100%",borderRadius:"4px 4px 0 0",background:isT?T.accent:T.border2,height:`${h}px`,opacity:0.85,cursor:"help"}}/>
+                      <div style={{fontSize:9,color:T.text4,transform:"rotate(-45deg)",transformOrigin:"top center",whiteSpace:"nowrap"}}>{d.date.slice(5)}</div>
+                    </div>);
+                  })}
+                </div>
+                {(()=>{
+                  const todayLogs=usageLogs.filter(r=>r.date===todayStr());
+                  return todayLogs.length>0?(<div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {todayLogs.map((r,i)=>{const p=PROVIDERS[r.provider];return p?(<div key={i} style={{padding:"7px 11px",background:T.card2,border:`1px solid ${T.border}`,borderLeft:`3px solid ${p.color}`,borderRadius:10,fontSize:12}}>
+                      <span style={{fontWeight:700,color:p.color}}>{p.name}</span>
+                      <span style={{color:T.text3,marginLeft:7}}>{fmt(r.input+r.output)} tokens</span>
+                      <span style={{color:T.text4,marginLeft:5}}>{r.calls}次</span>
+                    </div>):null;})}
+                  </div>):null;
+                })()}
+              </>):<div style={{textAlign:"center",padding:"28px",color:T.text4,fontSize:13,background:"#fbfcfe",border:`1px solid ${T.border}`,borderRadius:14}}>暂无使用记录</div>}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </Page>);
