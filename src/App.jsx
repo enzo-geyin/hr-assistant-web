@@ -3003,7 +3003,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCands={setCands} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
       </main>
     </div>
@@ -3785,7 +3785,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
+function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
   const [searchText,setSearchText]=useState("");
   const sortedCands=[...cands].sort((a,b)=>{
     const batchA=a.importBatchId||"";
@@ -3831,7 +3831,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
   };
   const totalCandidates=cands.length;
   const interviewCount=cands.filter(item=>item.status==="interview").length;
-  const passedCount=cands.filter(item=>item.status==="screened").length;
+  const passedCount=cands.filter(item=>item.status==="screening").length;
   const failedCount=cands.filter(item=>item.status==="rejected").length;
   const deleteCandidate=candidate=>{
     if(!candidate) return;
@@ -3931,7 +3931,7 @@ function CandidatesView({T,cands,setCands,jobs,selCand,setSelCand,tab,setTab,cfg
             </div>
             <div style={{padding:"10px 12px",borderRadius:12,background:"#ffffff",border:`1px solid ${T.border}`}}>
               <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>观察中</div>
-              <div style={{fontSize:18,fontWeight:900,color:"#ca8a04",marginTop:6}}>{cands.filter(item=>item.status==="pending").length}</div>
+              <div style={{fontSize:18,fontWeight:900,color:"#ca8a04",marginTop:6}}>{cands.filter(item=>item.status==="watching").length}</div>
             </div>
           </div>
           <div style={{position:"relative",marginTop:14}}>
