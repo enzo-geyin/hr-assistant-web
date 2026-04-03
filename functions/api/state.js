@@ -285,7 +285,13 @@ async function readState(db) {
         ...parsed,
         cands: (Array.isArray(parsed.cands) ? parsed.cands : []).map(candidate => {
           const preview = previewMap.get(String(candidate?.id || "").trim());
-          return preview ? { ...candidate, resumePreview: pickPreferredResumePreview(candidate?.resumePreview, preview) } : candidate;
+          return preview
+            ? {
+                ...candidate,
+                resumePreview: pickPreferredResumePreview(candidate?.resumePreview, preview),
+                resumePreviewCloud: pickPreferredResumePreview(candidate?.resumePreviewCloud, preview),
+              }
+            : candidate;
         }),
       }
     : parsed;

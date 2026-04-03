@@ -72,12 +72,14 @@ const pickPreferredResumePreview = (primary, fallback) => {
 };
 
 const buildCloudSafeResumePreview = candidate => {
-  const preview = candidate?.resumePreviewCloud || (candidate?.resumePreview?.previewMode === "light" ? candidate.resumePreview : null);
+  const preview = candidate?.resumePreviewCloud || candidate?.resumePreview;
   if (!preview?.src) return null;
+  const firstPage = (Array.isArray(preview.pages) && preview.pages.length ? preview.pages[0] : preview.src) || preview.src;
+  if (!firstPage) return null;
   return {
     kind: preview.kind || "image",
-    src: preview.src,
-    pages: Array.isArray(preview.pages) && preview.pages.length ? [preview.pages[0]] : [preview.src],
+    src: firstPage,
+    pages: [firstPage],
     name: preview.name || candidate?.resumeFileName || "",
     pageCount: Number(preview.pageCount) || previewPagesCount(preview) || 1,
     previewMode: "cloud",
@@ -4147,7 +4149,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
   const resumeKeywordHits=extractRoleKeywordHits(previewResume);
-  const visualPreview=cand?.resumePreview;
+  const visualPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
@@ -4279,15 +4281,15 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
         </div>
       </div>
     </div>}
-    <div style={{...shellCard,padding:"24px 24px 20px",marginBottom:16}}>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.35fr) minmax(240px,0.65fr)",gap:18,alignItems:"start"}}>
-        <div style={{display:"grid",gap:16,minWidth:0}}>
+    <div style={{...shellCard,padding:"22px 22px 18px",marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(260px,0.85fr)",gap:18,alignItems:"start"}}>
+        <div style={{display:"grid",gap:14,minWidth:0}}>
           <div style={{display:"flex",gap:16,alignItems:"flex-start",minWidth:0}}>
             <Av name={cand.name} T={T} size={58}/>
             <div style={{minWidth:0,flex:1}}>
               <div style={{fontSize:28,fontWeight:900,color:T.text,letterSpacing:"-0.035em",lineHeight:1.04}}>{cand.name||"未命名候选人"}</div>
               <div style={{fontSize:13,color:T.text3,marginTop:7,lineHeight:1.7}}>当前岗位：<strong style={{color:T.text}}>{accentRole}</strong></div>
-              {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.82,marginTop:12,maxWidth:760}}>{cand.screening.summary}</div>}
+              {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.82,marginTop:10,maxWidth:820}}>{cand.screening.summary}</div>}
             </div>
           </div>
 
@@ -4302,13 +4304,57 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(180px, 1fr))",gap:12}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             {overviewFacts.map(fact=>(
-              <div key={fact.label} style={{padding:"12px 14px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
-                <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</div>
-                <div style={{fontSize:14,fontWeight:800,color:fact.tone||T.text,lineHeight:1.6,marginTop:8,wordBreak:"break-word"}}>{fact.value}</div>
+              <div key={fact.label} style={{display:"flex",gap:8,alignItems:"center",padding:"10px 12px",borderRadius:999,background:"#ffffff",border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</span>
+                <span style={{fontSize:13,fontWeight:800,color:fact.tone||T.text,wordBreak:"break-word"}}>{fact.value}</span>
               </div>
             ))}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"minmax(300px,1fr) minmax(240px,0.9fr)",gap:14}}>
+            <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
+              <div style={{display:"grid",gap:12}}>
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
+                  <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                    <option value="">未绑定岗位</option>
+                    {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
+                  </select>
+                  {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap",width:"100%"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
+                </div>
+                <div>
+                  <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
+                  <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
+                    {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
+            </div>
+
+            <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
+              <div style={{display:"grid",gap:10}}>
+                <input
+                  id={`candidate-resume-replace-${cand.id}`}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
+                  style={{display:"none"}}
+                  onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
+                />
+                <button
+                  onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
+                  style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
+                >
+                  {replaceLoading?"更新中...":"重新上传原始简历"}
+                </button>
+                <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
+              </div>
+              {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
+            </div>
           </div>
         </div>
 
@@ -4328,50 +4374,6 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
     </div>
 
     <div style={{display:"grid",gap:16,marginBottom:16}}>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))",gap:16}}>
-        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
-          <div style={{display:"grid",gap:12}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>岗位匹配</div>
-              <select value={cand.jobId??""} onChange={e=>assignJob(e.target.value)} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-                <option value="">未绑定岗位</option>
-                {jobs.map(item=><option key={item.id} value={item.id}>{item.title}{item.department?` · ${item.department}`:""}</option>)}
-              </select>
-              {aiSuggestedJob&&cand.jobId!==aiSuggestedJob.id&&<button onClick={()=>assignJob(aiSuggestedJob.id)} style={{marginTop:8,padding:"8px 12px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap",width:"100%"}}>套用AI匹配：{aiSuggestedJob.title}</button>}
-            </div>
-            <div>
-              <div style={{fontSize:11,fontWeight:700,color:T.text4,marginBottom:8}}>候选人进度</div>
-              <select value={cand.status} onChange={e=>updCand(cand.id,{status:e.target.value,statusSource:"manual"})} style={{...inSt(T),width:"100%",fontSize:12,background:"#fff"}}>
-                {Object.entries(STATUS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>切换岗位后，建议到“简历筛选”里点一次“重新筛选”，让评分和后续面试题按新岗位重算。</div>
-        </div>
-
-        <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>快速操作</div>
-          <div style={{display:"grid",gap:10}}>
-            <input
-              id={`candidate-resume-replace-${cand.id}`}
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md"
-              style={{display:"none"}}
-              onChange={e=>{handleReplaceResumeFile(e.target.files?.[0]);e.target.value="";}}
-            />
-            <button
-              onClick={()=>!replaceLoading&&document.getElementById(`candidate-resume-replace-${cand.id}`)?.click()}
-              style={{padding:"11px 14px",background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:12,cursor:replaceLoading?"not-allowed":"pointer",fontSize:12,fontWeight:800,minHeight:44,opacity:replaceLoading?0.55:1}}
-            >
-              {replaceLoading?"更新中...":"重新上传原始简历"}
-            </button>
-            <button onClick={onDelete} style={{padding:"11px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:12,cursor:"pointer",fontSize:12,fontWeight:800,minHeight:44}}>删除简历</button>
-          </div>
-          {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
-        </div>
-      </div>
-
       {previewResume&&<div style={{...minorPanel,padding:"18px 20px",minWidth:0}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:12,flexWrap:"wrap"}}>
           <div style={{minWidth:0}}>
