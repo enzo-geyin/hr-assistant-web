@@ -712,6 +712,89 @@ const getEffectiveCandidateJob = (jobs, cand) => {
   return resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
 };
 
+const normalizeCompareMetricText = text => cleanListLine(text || "")
+  .toLowerCase()
+  .replace(/[，,。；;：:（）()【】[\]《》<>“”"'`]/g, "")
+  .replace(/\s+/g, "")
+  .replace(/该品类达人|该品类|相关经验|相关能力|合作模式|报价体系/g, match => match)
+  .replace(/具备|拥有|有一定的|一定的|能够|可以|独立|熟悉|了解|经验|能力|相关|以及|并且|进行|完成|较强|很强|强/g, "");
+
+const buildCompareMetricGrams = text => {
+  const src = normalizeCompareMetricText(text);
+  if (!src) return new Set();
+  const grams = new Set([src]);
+  for (let i = 0; i < src.length - 1; i += 1) grams.add(src.slice(i, i + 2));
+  return grams;
+};
+
+const compareMetricSimilarity = (left, right) => {
+  const a = normalizeCompareMetricText(left);
+  const b = normalizeCompareMetricText(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (a.includes(b) || b.includes(a)) return 0.9;
+  const gramsA = buildCompareMetricGrams(a);
+  const gramsB = buildCompareMetricGrams(b);
+  const union = new Set([...gramsA, ...gramsB]);
+  if (!union.size) return 0;
+  let inter = 0;
+  gramsA.forEach(token => { if (gramsB.has(token)) inter += 1; });
+  return inter / union.size;
+};
+
+const buildCompareRows = (cands, jobs, type = "t0") => {
+  const labelField = type === "t0" ? "requirement" : "dimension";
+  const jobLabels = dedupeLines(cands.flatMap(candidate => {
+    const effectiveJob = getEffectiveCandidateJob(jobs, candidate);
+    return type === "t0"
+      ? toLineArray(effectiveJob?.t0, 12)
+      : toLineArray(effectiveJob?.t1, 12);
+  }));
+  const rows = [];
+  const findRow = label => {
+    if (!label) return null;
+    let best = null;
+    rows.forEach(row => {
+      const score = compareMetricSimilarity(row.label, label);
+      if (!best || score > best.score) best = { row, score };
+    });
+    return best && best.score >= 0.62 ? best.row : null;
+  };
+  const ensureRow = (label, preferCanonical = false) => {
+    const cleaned = cleanListLine(label || "");
+    if (!cleaned) return null;
+    const existing = findRow(cleaned);
+    if (existing) {
+      if (preferCanonical && existing.label.length < cleaned.length) existing.label = cleaned;
+      return existing;
+    }
+    const row = { key: `${type}-${rows.length}-${cleaned}`, label: cleaned };
+    rows.push(row);
+    return row;
+  };
+
+  jobLabels.forEach(label => ensureRow(label, true));
+  cands.forEach(candidate => {
+    const items = type === "t0" ? candidate.screening?.t0?.items : candidate.screening?.t1?.items;
+    (items || []).forEach(item => ensureRow(item?.[labelField] || "", false));
+  });
+
+  return rows
+    .map(row => {
+      const values = Object.fromEntries(cands.map(candidate => {
+        const items = type === "t0" ? candidate.screening?.t0?.items : candidate.screening?.t1?.items;
+        const best = (items || []).reduce((memo, item) => {
+          const score = compareMetricSimilarity(row.label, item?.[labelField] || "");
+          if (!memo || score > memo.score) return { item, score };
+          return memo;
+        }, null);
+        return [candidate.id, best && best.score >= 0.52 ? best.item : null];
+      }));
+      return { ...row, values };
+    })
+    .filter(row => cands.some(candidate => row.values[candidate.id]));
+};
+
 const buildScreeningPrompt = (job, resume, learningCtx="", jobOptions=[]) => {
   const t0=job?.t0?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
   const t1=job?.t1?.split("\n").filter(Boolean).map(l=>`"${l.trim()}"`).join(",")||"";
@@ -3003,7 +3086,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       </aside>
 
       <main style={{flex:1,overflow:"auto"}}>
-        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport}/>}
+        {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport} cloud={cloud} jobComposer={jobComposer} questionTasks={questionTasks} interviewTasks={interviewTasks}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
@@ -3015,8 +3098,8 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
 // ─── COMPARE MODAL ───────────────────────────────────────────
 function CompareModal({T,ids,cands,jobs,onClose}) {
   const cs=ids.map(id=>cands.find(c=>c.id===id)).filter(Boolean);
-  const allT1=[...new Set(cs.flatMap(c=>c.screening?.t1?.items?.map(i=>i.dimension)||[]))];
-  const allT0=[...new Set(cs.flatMap(c=>c.screening?.t0?.items?.map(i=>i.requirement)||[]))];
+  const t0Rows=useMemo(()=>buildCompareRows(cs,jobs,"t0"),[cs,jobs]);
+  const t1Rows=useMemo(()=>buildCompareRows(cs,jobs,"t1"),[cs,jobs]);
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}} onClick={onClose}>
       <div style={{background:T.surface,borderRadius:16,width:"100%",maxWidth:920,padding:26,boxShadow:"0 24px 80px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
@@ -3045,20 +3128,20 @@ function CompareModal({T,ids,cands,jobs,onClose}) {
           })}
         </div>
         {/* T0 */}
-        {allT0.length>0&&<CmpSec T={T} label="T0 硬性条件">
-          {allT0.map(key=>(
-            <div key={key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
-              <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{key}</div>
-              {cs.map(c=>{const it=c.screening?.t0?.items?.find(i=>i.requirement===key);return <CmpScore key={c.id} it={it}/>;} )}
+        {t0Rows.length>0&&<CmpSec T={T} label="T0 硬性条件">
+          {t0Rows.map(row=>(
+            <div key={row.key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
+              <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{row.label}</div>
+              {cs.map(c=><CmpScore key={c.id} it={row.values[c.id]}/> )}
             </div>
           ))}
         </CmpSec>}
         {/* T1 */}
-        {allT1.length>0&&<CmpSec T={T} label="T1 核心评分">
-          {allT1.map(key=>(
-            <div key={key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
-              <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{key}</div>
-              {cs.map(c=>{const it=c.screening?.t1?.items?.find(i=>i.dimension===key);return <CmpScore key={c.id} it={it}/>;} )}
+        {t1Rows.length>0&&<CmpSec T={T} label="T1 核心评分">
+          {t1Rows.map(row=>(
+            <div key={row.key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
+              <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{row.label}</div>
+              {cs.map(c=><CmpScore key={c.id} it={row.values[c.id]}/> )}
             </div>
           ))}
         </CmpSec>}
@@ -3080,14 +3163,17 @@ const CmpSec=({T,label,children})=>(
   </div>
 );
 const CmpScore=({it})=>{
-  if(!it) return <div style={{fontSize:12,color:"#d1d5db",textAlign:"center"}}>—</div>;
+  if(!it) return <div style={{textAlign:"center"}}>
+    <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1"}}>未覆盖</div>
+    <div style={{fontSize:11,color:"#cbd5e1",marginTop:2}}>未评到该维度</div>
+  </div>;
   const pct=(it.score/(it.maxScore||5))*100;
   const c=scColor(it.score,it.maxScore||5);
   return(<div style={{textAlign:"center"}}><div style={{fontSize:16,fontWeight:800,color:c}}>{it.score}<span style={{fontSize:11,color:"#9ca3af"}}>/{it.maxScore||5}</span></div><div style={{height:3,background:"#e5e7eb",borderRadius:2,margin:"4px 8px 0"}}><div style={{width:`${pct}%`,height:"100%",background:c,borderRadius:2}}/></div></div>);
 };
 
 // ─── DASHBOARD ───────────────────────────────────────────────
-function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordTokens,dirCtx,dashboardUpload,setDashboardUpload,startDashboardResumeImport}) {
+function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordTokens,dirCtx,dashboardUpload,setDashboardUpload,startDashboardResumeImport,cloud,jobComposer,questionTasks,interviewTasks}) {
   const stats=[
     {label:"简历通过",val:cands.filter(c=>c.status==="screening").length,color:"#2563eb"},
     {label:"观察中",  val:cands.filter(c=>c.status==="watching").length, color:"#d97706"},
@@ -3112,6 +3198,42 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
     boxShadow:SOFT_SHADOW,
   };
   const passRate=total>0?Math.round(cands.filter(c=>["screening","interview","offer"].includes(c.status)).length/total*100):0;
+  const runningQuestionCount=Object.values(questionTasks||{}).filter(task=>task?.loading).length;
+  const runningInterviewCount=Object.values(interviewTasks||{}).filter(task=>task?.loading).length;
+  const dashboardQueuedCount=(dashboardUpload?.files||[]).length;
+  const dashboardProcessingCount=Object.values(dashboardUpload?.results||{}).filter(item=>item?.status==="processing").length;
+  const dashboardFailedCount=Object.values(dashboardUpload?.results||{}).filter(item=>item?.status==="error").length;
+  const failedQuestionTasks=Object.entries(questionTasks||{}).filter(([,task])=>task?.error).map(([candidateId,task])=>({
+    candidateName:cands.find(candidate=>String(candidate.id)===String(candidateId))?.name||"候选人",
+    message:task.error,
+  }));
+  const failedInterviewTasks=Object.entries(interviewTasks||{}).filter(([,task])=>task?.error).map(([candidateId,task])=>({
+    candidateName:cands.find(candidate=>String(candidate.id)===String(candidateId))?.name||"候选人",
+    message:task.error,
+  }));
+  const liveTasks=[
+    cloud?.phase==="syncing"||cloud?.phase==="loading"
+      ? {label:"云端同步",count:1,detail:cloud?.message||"正在和 D1 对齐简历库与候选人状态",color:"#2563eb",bg:"#eff6ff"}
+      : null,
+    dashboardUpload?.loading
+      ? {label:"简历导入",count:Math.max(dashboardProcessingCount,1),detail:dashboardUpload?.info||`正在处理 ${dashboardQueuedCount} 份简历`,color:"#0f766e",bg:"#ecfeff"}
+      : null,
+    jobComposer?.jdLoading
+      ? {label:"岗位 JD 识别",count:1,detail:jobComposer?.jdFileName?`正在解析 ${jobComposer.jdFileName}`:"正在识别岗位文件",color:"#7c3aed",bg:"#f5f3ff"}
+      : null,
+    runningQuestionCount
+      ? {label:"面试题生成",count:runningQuestionCount,detail:"候选人面试题正在后台补齐",color:"#8b5cf6",bg:"#f5f3ff"}
+      : null,
+    runningInterviewCount
+      ? {label:"面试评估",count:runningInterviewCount,detail:"面试记录解析与综合评估正在后台运行",color:"#2563eb",bg:"#eff6ff"}
+      : null,
+  ].filter(Boolean);
+  const taskFailures=[
+    dashboardUpload?.err ? {label:"简历导入失败",detail:dashboardUpload.err} : null,
+    jobComposer?.jdErr ? {label:"岗位 JD 识别失败",detail:jobComposer.jdErr} : null,
+    ...failedQuestionTasks.map(item=>({label:`${item.candidateName} · 面试题失败`,detail:item.message})),
+    ...failedInterviewTasks.map(item=>({label:`${item.candidateName} · 面试评估失败`,detail:item.message})),
+  ].filter(Boolean).slice(0,4);
   return(<Page T={T} title="仪表盘" sub="快手项目组 · 招聘总览">
     <SecLabel T={T}>数据看板</SecLabel>
     <div style={{...dashboardShell,padding:"22px 22px 18px",marginBottom:24}}>
@@ -3177,6 +3299,85 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
                   );
                 })}
               </div>}
+        </div>
+      </div>
+    </div>
+
+    <SecLabel T={T}>同步与任务中心</SecLabel>
+    <div style={{...dashboardShell,padding:"20px 22px",marginBottom:24}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(320px,0.85fr)",gap:18,alignItems:"stretch"}}>
+        <div style={{display:"grid",gap:14}}>
+          <div>
+            <div style={{fontSize:18,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>系统状态总览</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:720}}>这里专门回答两个问题：现在云端有没有正常同步、后台还有哪些任务正在跑。高频使用时先看这里，再决定是继续导简历、去安排面试，还是先处理异常。</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+            <div style={{padding:"14px 14px 12px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>云端同步</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:10,flexWrap:"wrap"}}>
+                <Chip c={cloud?.phase==="ready"?"#059669":cloud?.phase==="error"?"#dc2626":"#2563eb"} bg={cloud?.phase==="ready"?"#ecfdf5":cloud?.phase==="error"?"#fef2f2":"#eff6ff"} lg>
+                  {cloud?.phase==="ready"?"已同步":cloud?.phase==="error"?"异常":"处理中"}
+                </Chip>
+                {cloud?.updatedAt&&<span style={{fontSize:11,color:T.text4}}>最近成功：{fmtCloudTime(cloud.updatedAt)}</span>}
+              </div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:10}}>{cloud?.message||"等待读取云端状态..."}</div>
+            </div>
+            <div style={{padding:"14px 14px 12px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>后台任务</div>
+              <div style={{fontSize:30,fontWeight:900,color:liveTasks.length?"#111827":"#94a3b8",lineHeight:1,marginTop:10}}>{liveTasks.length}</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:8}}>
+                {liveTasks.length
+                  ? "有任务正在后台继续运行，切换页面不会中断。"
+                  : "当前没有进行中的后台任务，系统处于空闲状态。"}
+              </div>
+            </div>
+            <div style={{padding:"14px 14px 12px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>最近异常</div>
+              <div style={{fontSize:30,fontWeight:900,color:taskFailures.length?"#dc2626":"#16a34a",lineHeight:1,marginTop:10}}>{taskFailures.length}</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:8}}>
+                {taskFailures.length
+                  ? "建议先处理这些失败项，再继续批量导入或生成。"
+                  : "最近没有检测到需要你立即处理的失败项。"}
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style={{display:"grid",gap:12}}>
+          <div style={{padding:"14px 16px",borderRadius:18,background:"linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",border:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10}}>
+              <div style={{fontSize:13,fontWeight:900,color:T.text}}>进行中的后台任务</div>
+              <Chip c={liveTasks.length?"#2563eb":"#6b7280"} bg={liveTasks.length?"#eff6ff":"#f3f4f6"}>{liveTasks.length?`${liveTasks.length} 项`:"空闲"}</Chip>
+            </div>
+            {liveTasks.length===0
+              ? <div style={{fontSize:12,color:T.text4,lineHeight:1.8}}>当前没有导入、JD 识别、面试题生成或面试评估在后台运行。</div>
+              : <div style={{display:"grid",gap:10}}>
+                  {liveTasks.map(task=>(
+                    <div key={task.label} style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:12,alignItems:"start",padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
+                      <div style={{minWidth:64,textAlign:"center",padding:"8px 10px",borderRadius:999,background:task.bg,color:task.color,fontSize:12,fontWeight:900}}>{task.count}</div>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:800,color:T.text}}>{task.label}</div>
+                        <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:4}}>{task.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>}
+          </div>
+          <div style={{padding:"14px 16px",borderRadius:18,background:"linear-gradient(180deg, #fff7ed 0%, #ffffff 100%)",border:"1px solid #fed7aa"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10}}>
+              <div style={{fontSize:13,fontWeight:900,color:T.text}}>最近失败项</div>
+              <Chip c={taskFailures.length?"#dc2626":"#16a34a"} bg={taskFailures.length?"#fef2f2":"#ecfdf5"}>{taskFailures.length?`${taskFailures.length} 条`:"正常"}</Chip>
+            </div>
+            {taskFailures.length===0
+              ? <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>导入、题目生成、评估和 JD 识别最近都没有明显报错，可以继续推进今天的招聘流程。</div>
+              : <div style={{display:"grid",gap:10}}>
+                  {taskFailures.map((item,index)=>(
+                    <div key={`${item.label}-${index}`} style={{padding:"10px 12px",background:"#ffffff",borderRadius:14,border:"1px solid #fecaca"}}>
+                      <div style={{fontSize:12,fontWeight:800,color:"#991b1b"}}>{item.label}</div>
+                      <div style={{fontSize:12,color:"#7f1d1d",lineHeight:1.8,marginTop:4}}>{item.detail}</div>
+                    </div>
+                  ))}
+                </div>}
+          </div>
         </div>
       </div>
     </div>
