@@ -3739,25 +3739,33 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
   const jobMeta=[job?.department,job?.level,job?.salary].filter(Boolean).join(" · ");
   const requirementsList=(job?.requirements||"").split("\n").map(item=>item.trim()).filter(Boolean);
   return(<Page T={T} title="岗位管理" sub="创建和管理在招职位">
-    <div style={{...jobsShell,padding:"18px 20px",marginBottom:18}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:18,flexWrap:"wrap"}}>
-        <div style={{flex:"1 1 460px",minWidth:0}}>
+    <div style={{...jobsShell,padding:"20px 22px 18px",marginBottom:18}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(320px,0.8fr)",gap:18,alignItems:"start"}}>
+        <div>
           <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>岗位工作台</div>
-          <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>左侧保持岗位轨道，右侧专注岗位详情、JD 规整与候选人推进。把岗位创建、规则维护和候选人流转放在同一条工作线上，不再拆成很多散卡片。</div>
+          <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>左侧保持岗位轨道，右侧专注岗位详情、JD 规整与候选人推进。岗位创建、规则维护和候选人流转都放在同一条工作线上，避免在不同页面来回切换。</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+            <Chip c={T.text3} bg={T.card2}>{jobs.length} 个在招岗位</Chip>
+            <Chip c="#059669" bg="#ecfdf5">{cands.length} 位候选人</Chip>
+            <Chip c="#7c3aed" bg="#f5f3ff">{jdLoading?"JD 识别进行中":"JD 识别空闲"}</Chip>
+          </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(112px,1fr))",gap:10,minWidth:320,flex:"0 0 360px"}}>
-          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>在招岗位</div>
-            <div style={{fontSize:24,fontWeight:900,color:T.text,marginTop:8,lineHeight:1}}>{jobs.length}</div>
+        <div style={{padding:"14px 16px",borderRadius:18,background:"#ffffff",border:`1px solid ${T.border}`,display:"grid",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>在招岗位</div>
+              <div style={{fontSize:24,fontWeight:900,color:T.text,marginTop:8,lineHeight:1}}>{jobs.length}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>已入库候选人</div>
+              <div style={{fontSize:24,fontWeight:900,color:"#059669",marginTop:8,lineHeight:1}}>{cands.length}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>JD 任务</div>
+              <div style={{fontSize:24,fontWeight:900,color:"#7c3aed",marginTop:8,lineHeight:1}}>{jdLoading?1:0}</div>
+            </div>
           </div>
-          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#ecfdf5",border:"1px solid #bbf7d0"}}>
-            <div style={{fontSize:10,fontWeight:800,color:"#059669",letterSpacing:"0.08em"}}>已入库候选人</div>
-            <div style={{fontSize:24,fontWeight:900,color:"#059669",marginTop:8,lineHeight:1}}>{cands.length}</div>
-          </div>
-          <div style={{padding:"12px 12px 10px",borderRadius:14,background:"#f5f3ff",border:"1px solid #ddd6fe"}}>
-            <div style={{fontSize:10,fontWeight:800,color:"#7c3aed",letterSpacing:"0.08em"}}>JD 识别任务</div>
-            <div style={{fontSize:24,fontWeight:900,color:"#7c3aed",marginTop:8,lineHeight:1}}>{jdLoading?1:0}</div>
-          </div>
+          <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>当前更适合把这页当成岗位运营台：先整理 JD 和评分底座，再持续把候选人推入对应岗位，而不是把岗位当作静态配置表。</div>
         </div>
       </div>
     </div>
@@ -4483,14 +4491,14 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       </div>
     </div>}
     <div style={{...shellCard,padding:"22px 22px 18px",marginBottom:16}}>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(260px,0.85fr)",gap:18,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(360px,0.95fr)",gap:18,alignItems:"start"}}>
         <div style={{display:"grid",gap:14,minWidth:0}}>
-          <div style={{display:"flex",gap:16,alignItems:"flex-start",minWidth:0}}>
+          <div style={{display:"grid",gridTemplateColumns:"auto minmax(0,1fr)",gap:16,alignItems:"start"}}>
             <Av name={cand.name} T={T} size={58}/>
-            <div style={{minWidth:0,flex:1}}>
+            <div style={{minWidth:0}}>
               <div style={{fontSize:28,fontWeight:900,color:T.text,letterSpacing:"-0.035em",lineHeight:1.04}}>{cand.name||"未命名候选人"}</div>
               <div style={{fontSize:13,color:T.text3,marginTop:7,lineHeight:1.7}}>当前岗位：<strong style={{color:T.text}}>{accentRole}</strong></div>
-              {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.82,marginTop:10,maxWidth:820}}>{cand.screening.summary}</div>}
+              {cand.screening?.summary&&<div style={{fontSize:13,color:T.text2,lineHeight:1.82,marginTop:10,maxWidth:760}}>{cand.screening.summary}</div>}
             </div>
           </div>
 
@@ -4505,16 +4513,31 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             {cand.resumePreviewStatus==="failed"&&<span style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:20,background:"#fee2e2",color:"#dc2626"}}>完整预览补全失败</span>}
           </div>
 
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
             {overviewFacts.map(fact=>(
-              <div key={fact.label} style={{display:"flex",gap:8,alignItems:"center",padding:"10px 12px",borderRadius:999,background:"#ffffff",border:`1px solid ${T.border}`}}>
-                <span style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</span>
-                <span style={{fontSize:13,fontWeight:800,color:fact.tone||T.text,wordBreak:"break-word"}}>{fact.value}</span>
+              <div key={fact.label} style={{padding:"12px 14px 11px",borderRadius:16,background:"#ffffff",border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{fact.label}</div>
+                <div style={{fontSize:13,fontWeight:800,color:fact.tone||T.text,wordBreak:"break-word",lineHeight:1.55,marginTop:8}}>{fact.value}</div>
               </div>
             ))}
           </div>
+        </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"minmax(300px,1fr) minmax(240px,0.9fr)",gap:14}}>
+        <div style={{display:"grid",gap:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            {cand.screening&&<div style={{padding:"16px 18px",borderRadius:18,background:"#f8fbff",border:`1px solid ${T.border}`,textAlign:"left",boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>AI 评分</div>
+              <div style={{fontSize:42,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1,marginTop:10}}>{cand.screening.overallScore?.toFixed(1)}</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:6}}>/ 5.0</div>
+            </div>}
+            <div style={{padding:"14px 16px",borderRadius:18,background:"#f8fafc",border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前进度</div>
+              <div style={{fontSize:17,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:10}}>{currentStatusMeta?.label||"待处理"}</div>
+              {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}</div>}
+            </div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.12fr) minmax(0,0.88fr)",gap:12}}>
             <div style={{...minorPanel,padding:"16px 16px 14px",minWidth:0}}>
               <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>岗位与状态</div>
               <div style={{display:"grid",gap:12}}>
@@ -4556,19 +4579,6 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
               </div>
               {replaceErr&&<div style={{marginTop:10}}><ErrBox>{replaceErr}</ErrBox></div>}
             </div>
-          </div>
-        </div>
-
-        <div style={{display:"grid",gap:12}}>
-          {cand.screening&&<div style={{padding:"16px 18px",borderRadius:18,background:"#f8fbff",border:`1px solid ${T.border}`,textAlign:"left",boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
-            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>AI 评分</div>
-            <div style={{fontSize:42,fontWeight:900,color:scColor(cand.screening.overallScore),lineHeight:1,marginTop:10}}>{cand.screening.overallScore?.toFixed(1)}</div>
-            <div style={{fontSize:11,color:T.text4,marginTop:6}}>/ 5.0</div>
-          </div>}
-          <div style={{padding:"14px 16px",borderRadius:18,background:"#f8fafc",border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
-            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前进度</div>
-            <div style={{fontSize:17,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:10}}>{currentStatusMeta?.label||"待处理"}</div>
-            {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}</div>}
           </div>
         </div>
       </div>
@@ -5692,19 +5702,28 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   return(<Page T={T} title="设置" sub="配置 API 密钥、AI 模型与界面偏好">
     <div style={{display:"grid",gridTemplateColumns:"minmax(0,0.95fr) minmax(360px,1.05fr)",gap:18,alignItems:"start"}}>
       <div style={{display:"grid",gap:18}}>
-        <div style={{...settingsShell,padding:"18px 20px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:18,flexWrap:"wrap"}}>
-            <div style={{flex:"1 1 420px",minWidth:0}}>
+        <div style={{...settingsShell,padding:"20px 22px 18px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.18fr) minmax(320px,0.82fr)",gap:18,alignItems:"start"}}>
+            <div>
               <div style={{fontSize:22,fontWeight:900,color:T.text,letterSpacing:"-0.03em"}}>系统与模型控制台</div>
-              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>把模型连通、云端同步、主题风格和日常用量收进一个控制台里。上面看系统健康度，下面再处理具体配置，避免设置页也变成很多等权重的小卡片。</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:760}}>把模型连通、云端同步、主题风格和日常用量收进一个控制台里。先看系统健康度，再处理具体配置，避免设置页也变成很多等权重的小卡片。</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:14}}>
+                {systemSummaryCards.map(item=>(
+                  <Chip key={item.label} c={item.tone} bg="#ffffff">{`${item.label} · ${item.value}`}</Chip>
+                ))}
+              </div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(112px,1fr))",gap:10,minWidth:340,flex:"0 0 380px"}}>
-              {systemSummaryCards.map(item=>(
-                <div key={item.label} style={{padding:"12px 12px 10px",borderRadius:14,background:"#ffffff",border:`1px solid ${T.border}`}}>
-                  <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{item.label}</div>
-                  <div style={{fontSize:18,fontWeight:900,color:item.tone,marginTop:8,lineHeight:1.2}}>{item.value}</div>
-                </div>
-              ))}
+            <div style={{padding:"14px 16px",borderRadius:18,background:"#ffffff",border:`1px solid ${T.border}`,display:"grid",gap:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>系统快照</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+                {systemSummaryCards.map(item=>(
+                  <div key={item.label}>
+                    <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>{item.label}</div>
+                    <div style={{fontSize:18,fontWeight:900,color:item.tone,marginTop:8,lineHeight:1.2}}>{item.value}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>代理模式、云端同步和后台模型连接数都会汇总到这里，先看系统是否健康，再往下调模型和同步策略。</div>
             </div>
           </div>
         </div>
