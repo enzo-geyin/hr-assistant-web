@@ -5002,12 +5002,27 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const timeInputRef=useRef(null);
   const prevInterviewCountRef=useRef((cand.interviews||[]).length);
   const currentFileKind=noteFile?getFileKind(noteFile):"unknown";
+  const latestInterviewRecord=(cand.interviews||[]).slice(-1)[0] || null;
   const workPanel={
     background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
     border:`1px solid ${T.border}`,
     borderRadius:18,
     boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
   };
+  const workspaceShell={
+    ...workPanel,
+    padding:0,
+    overflow:"hidden",
+  };
+  const workspaceRail={
+    padding:"20px 18px 18px",
+    background:"#fcfdff",
+    borderRight:`1px solid ${T.border}`,
+    display:"grid",
+    gap:16,
+    alignContent:"start",
+  };
+  const railDivider={paddingTop:16,borderTop:`1px solid ${T.border}`};
   const fileStageMeta={
     idle:{label:"未上传",bg:T.card2,color:T.text4},
     queued:{label:"已选择",bg:"#eff6ff",color:"#2563eb"},
@@ -5113,103 +5128,145 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   };
 
   return(<div>
+    <div style={{...workPanel,padding:"18px 20px 16px",marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.1fr) minmax(260px,0.9fr)",gap:16,alignItems:"start"}}>
+        <div>
+          <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试记录工作台</div>
+          <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:720}}>左侧负责安排面试和补充文件，右侧专注记录真实面试笔记与综合评估。这样你在同一屏里就能完成预约、补充材料和最终回放。</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+            <Chip c={cand.scheduledAt?"#7c3aed":T.text3} bg={cand.scheduledAt?"#f5f3ff":T.card2}>
+              {cand.scheduledAt?`已预约：${fmtDate(cand.scheduledAt)}`:"待安排面试时间"}
+            </Chip>
+            <Chip c={(cand.interviews||[]).length?"#059669":T.text3} bg={(cand.interviews||[]).length?"#ecfdf5":T.card2}>
+              {`${(cand.interviews||[]).length} 轮面试记录`}
+            </Chip>
+            <Chip c={fileStageMeta.color} bg={fileStageMeta.bg}>
+              {currentFileKind==="audio"&&fileStage!=="idle"?"录音材料":"面试材料"} · {fileStageMeta.label}
+            </Chip>
+          </div>
+        </div>
+        <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+          <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>最近一轮回放</div>
+          {latestInterviewRecord?.assessment
+            ?<>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",gap:12,marginTop:10}}>
+                <div style={{fontSize:16,fontWeight:900,color:T.text}}>{latestInterviewRecord.round}</div>
+                <div style={{fontSize:26,fontWeight:950,color:scColor(latestInterviewRecord.assessment.score),lineHeight:1}}>{latestInterviewRecord.assessment.score?.toFixed(1)}</div>
+              </div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.75,marginTop:8}}>{latestInterviewRecord.assessment.suggestion}</div>
+            </>
+            :<div style={{fontSize:12,color:T.text4,lineHeight:1.75,marginTop:10}}>还没有完成综合评估。先记录面试笔记，再让系统给出这一轮的判断。</div>}
+        </div>
+      </div>
+    </div>
     {(cand.interviews||[]).length>0&&<div style={{marginBottom:16}}>
       <div style={{fontSize:12,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>面试轨迹</div>
       {(cand.interviews||[]).map((ir,i)=><IRecord key={i} T={T} record={ir}/>)}
     </div>}
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(320px, 1fr))",gap:16,alignItems:"start"}}>
-      <div style={{display:"grid",gap:16}}>
-        <div style={{...workPanel,padding:"18px 18px 16px"}}>
-          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:12}}>安排面试时间</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div><label style={lbSt(T)}>面试轮次</label>
-              <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T)}}>
-                {roundOptions.map(r=><option key={r}>{r}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={lbSt(T)}>面试日期</label>
-              <div style={{display:"flex",gap:8}}>
-                <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1}}/>
-                <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
-              </div>
-            </div>
-            <div>
-              <label style={lbSt(T)}>面试时间</label>
-              <div style={{display:"flex",gap:8}}>
-                <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1}}/>
-                <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
-              </div>
-            </div>
-            <div style={{display:"grid",gap:8,alignContent:"end"}}>
-              <button onClick={saveSchedule} disabled={!schedDate}
-                style={{padding:"10px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:10,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>
-                {cand.scheduledAt?"更新预约":"确认预约"}
-              </button>
-              {cand.scheduledAt&&<button
-                onClick={clearSchedule}
-                style={{padding:"10px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}
-              >
-                删除预约
-              </button>}
-            </div>
-          </div>
-          {isSingleRoundLevel(job?.level)&&<div style={{marginTop:12,fontSize:12,color:T.text3,lineHeight:1.75,padding:"10px 12px",background:T.card2,borderRadius:12}}>
-            当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
-          </div>}
-          {cand.scheduledAt&&<div style={{marginTop:12,fontSize:13,color:"#7c3aed",fontWeight:700}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
-        </div>
-
-        <div style={{...workPanel,padding:"18px 18px 16px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
-            <div>
-              <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>上传面试记录文件</div>
-              <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>支持 PDF、图片、Word(.docx)、txt / md 与录音文件，识别后会自动追加到笔记里。</div>
-            </div>
-            {fileStage!=="idle"&&<span style={{padding:"5px 10px",borderRadius:999,fontSize:11,fontWeight:700,background:fileStageMeta.bg,color:fileStageMeta.color}}>{fileStageMeta.label}</span>}
-          </div>
-          <div
-            onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
-            onDragLeave={()=>setNoteDrag(false)}
-            onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
-            onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
-            style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:14,padding:"22px 16px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:T.inputBg,transition:"all 0.15s",marginBottom:12}}>
-            <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
-            {fileLoading
-              ?<div><Spin text={currentFileKind==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到右侧笔记</div></div>
-              :noteFileName
-                ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
-                :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>}
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-            <div style={{fontSize:11,color:T.text4,lineHeight:1.7}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
-            <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"9px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:800}}>
-              {fileLoading?"识别中...":"识别并追加到笔记"}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div style={{...workPanel,padding:"18px 18px 16px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:12}}>
+    <div style={{...workspaceShell,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(320px,0.8fr) minmax(0,1.2fr)",alignItems:"stretch"}}>
+        <div style={workspaceRail}>
           <div>
-            <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试笔记与综合评估</div>
-            <div style={{fontSize:11,color:T.text4,marginTop:4,lineHeight:1.7}}>把人工笔记、文件识别结果和历史判断标准收进一处，当前页直接完成综合判断。</div>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>安排面试</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><label style={lbSt(T)}>面试轮次</label>
+                <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T),background:"#fff"}}>
+                  {roundOptions.map(r=><option key={r}>{r}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={lbSt(T)}>面试日期</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1,background:"#fff"}}/>
+                  <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
+                </div>
+              </div>
+              <div>
+                <label style={lbSt(T)}>面试时间</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1,background:"#fff"}}/>
+                  <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
+                </div>
+              </div>
+              <div style={{display:"grid",gap:8,alignContent:"end"}}>
+                <button onClick={saveSchedule} disabled={!schedDate}
+                  style={{padding:"10px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:10,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>
+                  {cand.scheduledAt?"更新预约":"确认预约"}
+                </button>
+                {cand.scheduledAt&&<button
+                  onClick={clearSchedule}
+                  style={{padding:"10px 14px",background:"#fff5f5",color:"#dc2626",border:"1px solid #fecaca",borderRadius:10,cursor:"pointer",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}
+                >
+                  删除预约
+                </button>}
+              </div>
+            </div>
+            {isSingleRoundLevel(job?.level)&&<div style={{marginTop:12,fontSize:12,color:T.text3,lineHeight:1.75,padding:"10px 12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:12}}>
+              当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
+            </div>}
+            {cand.scheduledAt&&<div style={{marginTop:12,fontSize:13,color:"#7c3aed",fontWeight:700}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
           </div>
-          {loading&&<span style={{fontSize:11,color:"#2563eb",padding:"5px 10px",background:"#eff6ff",borderRadius:999,fontWeight:700}}>后台评估运行中</span>}
+
+          <div style={railDivider}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>面试材料</div>
+                <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>支持 PDF、图片、Word、txt / md 和录音，识别后会直接追加到右侧笔记。</div>
+              </div>
+              {fileStage!=="idle"&&<span style={{padding:"5px 10px",borderRadius:999,fontSize:11,fontWeight:700,background:fileStageMeta.bg,color:fileStageMeta.color}}>{fileStageMeta.label}</span>}
+            </div>
+            <div
+              onDragOver={e=>{e.preventDefault();setNoteDrag(true);}}
+              onDragLeave={()=>setNoteDrag(false)}
+              onDrop={e=>{e.preventDefault();setNoteDrag(false);queueNoteFile(e.dataTransfer.files?.[0]);}}
+              onClick={()=>!fileLoading&&document.getElementById(`interview-file-input-${cand.id}`)?.click()}
+              style={{border:`2px dashed ${noteDrag?T.accent:T.border2}`,borderRadius:14,padding:"22px 16px",textAlign:"center",cursor:fileLoading?"default":"pointer",background:noteDrag?`${T.accent}10`:"#ffffff",transition:"all 0.15s",marginBottom:12}}>
+              <input id={`interview-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md,.markdown,.mp3,.m4a,.wav,.aac,.ogg,.oga,.webm,.mp4,audio/*" style={{display:"none"}} onChange={e=>{queueNoteFile(e.target.files?.[0]);e.target.value="";}}/>
+              {fileLoading
+                ?<div><Spin text={currentFileKind==="audio"?"正在转写录音文件...":"正在识别面试记录文件..."} /><div style={{fontSize:11,color:T.text4,marginTop:6}}>识别完成后会自动追加到右侧笔记</div></div>
+                :noteFileName
+                  ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{noteFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>点击下方按钮即可识别并追加到笔记</div></div>
+                  :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:T.text4,lineHeight:1.7}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
+              <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"9px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:800}}>
+                {fileLoading?"识别中...":"识别并追加到笔记"}
+              </button>
+            </div>
+          </div>
         </div>
-        <div style={{marginBottom:12}}><label style={lbSt(T)}>面试笔记 *</label>
-          <textarea rows={14} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.8}}
-            placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
+
+        <div style={{padding:"20px 22px 18px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14}}>
+            <div>
+              <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试笔记与综合评估</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75,maxWidth:760}}>把人工笔记、补充材料和历史判断标准收进一处，当前页就能完成这一轮评估，不用再在多个卡片之间来回跳转。</div>
+            </div>
+            {loading&&<span style={{fontSize:11,color:"#2563eb",padding:"5px 10px",background:"#eff6ff",borderRadius:999,fontWeight:700}}>后台评估运行中</span>}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(220px,0.34fr)",gap:14,alignItems:"start",marginBottom:12}}>
+            <div>
+              <label style={lbSt(T)}>面试笔记 *</label>
+              <textarea rows={15} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.8,background:"#fff"}}
+                placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
+            </div>
+            <div style={{padding:"14px 16px",background:"#fbfcfe",border:`1px solid ${T.border}`,borderRadius:16}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>本轮评估提示</div>
+              <div style={{display:"grid",gap:10}}>
+                <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>优先记录候选人真实做过的事、你追问后的反应，以及现场最打动或最让你警惕的点。</div>
+                {dirCtx&&<div style={{fontSize:12,color:T.accent,lineHeight:1.75,padding:"10px 12px",background:`${T.accent}10`,borderRadius:12}}>AI 将参考你的历史判断标准进行评估。</div>}
+                {loading&&<div style={{fontSize:12,color:"#2563eb",lineHeight:1.75,padding:"10px 12px",background:"#eff6ff",borderRadius:12}}>面试综合评估正在后台运行中，切换窗口不会中断。</div>}
+              </div>
+            </div>
+          </div>
+          {err&&<ErrBox>{err}</ErrBox>}
+          {!!rawErr&&<details style={{marginBottom:10}}>
+            <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
+            <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
+          </details>}
+          <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
         </div>
-        {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"7px 10px",background:`${T.accent}10`,borderRadius:10}}>✦ AI将参考你的历史判断标准进行评估</div>}
-        {loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"7px 10px",background:"#eff6ff",borderRadius:10}}>✦ 面试综合评估正在后台运行中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
-        {err&&<ErrBox>{err}</ErrBox>}
-        {!!rawErr&&<details style={{marginBottom:10}}>
-          <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
-          <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
-        </details>}
-        <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
       </div>
     </div>
   </div>);
@@ -5478,88 +5535,126 @@ function DirectorTab({T,cand,job,cfg,updCand,recordTokens,learning,learningState
     borderRadius:18,
     boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
   };
+  const decisionShell={
+    ...panel,
+    padding:0,
+    overflow:"hidden",
+  };
 
   return(<div>
-    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(340px,0.85fr)",gap:16,alignItems:"start",marginBottom:16}}>
-      <div style={{...panel,padding:"20px 22px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:14,flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{saved?"更新我的判断":"填写我的判断"}</div>
-            <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:560}}>最终结果以面试官/总监判断为准。这里不是简单给结论，而是把你真正的判断依据沉淀成可学习的规则样本。</div>
-          </div>
-          {saved&&<Chip c="#059669" bg="#ecfdf5">已保存于 {dir.date}</Chip>}
-        </div>
-
-        <div style={{padding:"14px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16,marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>最终决定</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:10}}>
-            {[["录用","#059669","#ecfdf5"],["通过","#2563eb","#eff6ff"],["待定","#ca8a04","#fef9c3"],["淘汰","#dc2626","#fef2f2"]].map(([v,c,bg])=>(
-              <div key={v} onClick={()=>setVerdict(v)}
-                style={{padding:"13px 10px",textAlign:"center",borderRadius:14,border:`2px solid ${verdict===v?c:T.border}`,cursor:"pointer",background:verdict===v?bg:"#ffffff",fontWeight:850,fontSize:13,color:verdict===v?c:T.text3,transition:"all 0.1s"}}>
-                {v}
-              </div>
-            ))}
+    <div style={{...panel,padding:"18px 20px 16px",marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.12fr) minmax(280px,0.88fr)",gap:16,alignItems:"start"}}>
+        <div>
+          <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>最终决策台</div>
+          <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:760}}>这里不是简单给结论，而是把你真正的判断依据沉淀成可学习规则。AI 录用建议只做参考，最终结果始终以面试官或总监判断为准。</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+            <Chip c={recSt(aiRec).c} bg={recSt(aiRec).bg}>{`AI建议：${aiRec||"未评估"}`}</Chip>
+            <Chip c={saved?(verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"):T.text4} bg={saved?(verdict==="录用"?"#ecfdf5":verdict==="淘汰"?"#fef2f2":"#fffbeb"):T.card2}>
+              {saved?`人工最终：${verdict}`:"等待人工判断"}
+            </Chip>
+            {gapAnalysis&&<Chip c={match?"#059669":"#c2410c"} bg={match?"#ecfdf5":"#fff7ed"}>{match?"AI 与人工一致":"AI 与人工有分歧"}</Chip>}
           </div>
         </div>
-
         <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
-          <label style={{...lbSt(T),marginBottom:8}}>我的点评（这将成为 AI 的学习参考）</label>
-          <textarea rows={9} value={reason} onChange={e=>setReason(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.9}}
-            placeholder={"请写出你真正的判断依据。\n建议至少覆盖：\n· 为什么录用/淘汰/待定\n· 现场最打动你的地方\n· 你最不放心的风险点\n· 如果推进，下一步要继续验证什么"} />
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
-            <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>这段文字会被保存成学习样本，用来校正后续的 AI 录用建议和题库走向。</div>
-            <BtnPrimary T={T} onClick={save} disabled={saving||!verdict||!reason.trim()}>
-              {saving?<Spin text="沉淀学习中..."/>:(saved?"更新判断":"保存判断 · 沉淀为AI参考")}
-            </BtnPrimary>
+          <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>学习沉淀</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginTop:10}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>样本数</div>
+              <div style={{fontSize:18,fontWeight:900,color:T.text,marginTop:6}}>{Number(learning?.sampleCount)||0}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>规则版本</div>
+              <div style={{fontSize:18,fontWeight:900,color:"#059669",marginTop:6}}>{learning?.rubricVersion||"—"}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>题库版本</div>
+              <div style={{fontSize:18,fontWeight:900,color:"#7c3aed",marginTop:6}}>{learning?.questionBankVersion||"—"}</div>
+            </div>
           </div>
         </div>
       </div>
-
-      <div style={{display:"grid",gap:16}}>
-        <div style={{...panel,padding:"20px 20px 18px"}}>
-          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:12}}>AI 建议与人工最终结果</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16,textAlign:"center"}}>
-              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
-              <div style={{fontSize:18,fontWeight:800,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
-              <div style={{fontSize:34,fontWeight:950,color:scColor(cand.screening?.overallScore),marginTop:10,lineHeight:1}}>{cand.screening?.overallScore?.toFixed(1)||"—"}</div>
-              <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
-              {screeningRec && screeningRec!==aiRec && <div style={{fontSize:11,color:T.text4,marginTop:8}}>简历初筛：{screeningRec}</div>}
+    </div>
+    <div style={{...decisionShell,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.12fr) minmax(320px,0.88fr)",alignItems:"stretch"}}>
+        <div style={{padding:"22px 24px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+            <div>
+              <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{saved?"更新我的判断":"填写我的判断"}</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8,marginTop:6,maxWidth:620}}>最终结果以面试官/总监判断为准。这里不是简单给结论，而是把你真正的判断依据沉淀成规则样本，反过来校正后续的 AI 录用建议。</div>
             </div>
-            <div style={{padding:"16px 14px",background:T.card2,borderRadius:16,textAlign:"center",border:`2px solid ${saved?(verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"):T.border}`}}>
-              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
-              {saved?<div style={{fontSize:18,fontWeight:800,color:verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}}>{verdict}</div>:<div style={{fontSize:13,color:T.text4}}>待填写</div>}
-              {saved&&aiRec&&<div style={{marginTop:10,fontSize:12,fontWeight:800,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 判断一致":"✗ 以人工判断为准"}</div>}
+            {saved&&<Chip c="#059669" bg="#ecfdf5">已保存于 {dir.date}</Chip>}
+          </div>
+
+          <div style={{padding:"14px 16px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>最终决定</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4, minmax(0, 1fr))",gap:10}}>
+              {[["录用","#059669","#ecfdf5"],["通过","#2563eb","#eff6ff"],["待定","#ca8a04","#fef9c3"],["淘汰","#dc2626","#fef2f2"]].map(([v,c,bg])=>(
+                <div key={v} onClick={()=>setVerdict(v)}
+                  style={{padding:"13px 10px",textAlign:"center",borderRadius:14,border:`2px solid ${verdict===v?c:T.border}`,cursor:"pointer",background:verdict===v?bg:"#ffffff",fontWeight:850,fontSize:13,color:verdict===v?c:T.text3,transition:"all 0.1s"}}>
+                  {v}
+                </div>
+              ))}
             </div>
           </div>
 
-          {gapAnalysis&&<div style={{marginTop:14,padding:"14px 16px",background:match?"#f0fdf4":"#fff7ed",borderRadius:16,border:`1px solid ${match?"#bbf7d0":"#fed7aa"}`}}>
-            <div style={{fontSize:12,fontWeight:800,color:match?"#166534":"#9a3412",letterSpacing:"0.04em",marginBottom:6}}>{gapAnalysis.title}</div>
-            <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>{gapAnalysis.summary}</div>
-            {gapAnalysis.reasons?.length>0&&<div style={{marginTop:10,display:"grid",gap:6}}>
-              {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
-            </div>}
-          </div>}
+          <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+            <label style={{...lbSt(T),marginBottom:8}}>我的点评（这将成为 AI 的学习参考）</label>
+            <textarea rows={9} value={reason} onChange={e=>setReason(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.9}}
+              placeholder={"请写出你真正的判断依据。\n建议至少覆盖：\n· 为什么录用/淘汰/待定\n· 现场最打动你的地方\n· 你最不放心的风险点\n· 如果推进，下一步要继续验证什么"} />
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginTop:12,flexWrap:"wrap"}}>
+              <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>这段文字会被保存成学习样本，用来校正后续的 AI 录用建议和题库走向。</div>
+              <BtnPrimary T={T} onClick={save} disabled={saving||!verdict||!reason.trim()}>
+                {saving?<Spin text="沉淀学习中..."/>:(saved?"更新判断":"保存判断 · 沉淀为AI参考")}
+              </BtnPrimary>
+            </div>
+          </div>
         </div>
 
-        <div style={{...panel,padding:"20px 20px 18px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:10}}>
-            <div>
-              <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>岗位学习状态</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.75}}>
-                当前岗位已沉淀 {Number(learning?.sampleCount)||0} 条学习样本
-                {learning?.rubricVersion?` · 规则 v${learning.rubricVersion}`:" · 暂无规则版本"}
-                {learning?.questionBankVersion?` · 题库 v${learning.questionBankVersion}`:" · 暂无题库版本"}
+        <div style={{padding:"22px 20px 20px",background:"#fcfdff",borderLeft:`1px solid ${T.border}`,display:"grid",gap:16,alignContent:"start"}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>AI 对照</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{padding:"16px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16,textAlign:"center"}}>
+                <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
+                <div style={{fontSize:18,fontWeight:800,color:recSt(aiRec).c}}>{aiRec||"未评估"}</div>
+                <div style={{fontSize:34,fontWeight:950,color:scColor(cand.screening?.overallScore),marginTop:10,lineHeight:1}}>{cand.screening?.overallScore?.toFixed(1)||"—"}</div>
+                <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+                {screeningRec && screeningRec!==aiRec && <div style={{fontSize:11,color:T.text4,marginTop:8}}>简历初筛：{screeningRec}</div>}
+              </div>
+              <div style={{padding:"16px 14px",background:"#ffffff",borderRadius:16,textAlign:"center",border:`2px solid ${saved?(verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"):T.border}`}}>
+                <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
+                {saved?<div style={{fontSize:18,fontWeight:800,color:verdict==="录用"?"#059669":verdict==="淘汰"?"#dc2626":"#ca8a04"}}>{verdict}</div>:<div style={{fontSize:13,color:T.text4}}>待填写</div>}
+                {saved&&aiRec&&<div style={{marginTop:10,fontSize:12,fontWeight:800,color:match?"#16a34a":"#dc2626"}}>{match?"✓ 判断一致":"✗ 以人工判断为准"}</div>}
               </div>
             </div>
-            {learningState?.loading&&<Chip c="#2563eb" bg="#eff6ff">学习数据加载中</Chip>}
-            {!learningState?.loading&&learning?.rubricVersion&&<Chip c="#059669" bg="#ecfdf5">已启用学习规则</Chip>}
+            {gapAnalysis&&<div style={{marginTop:14,padding:"14px 16px",background:match?"#f0fdf4":"#fff7ed",borderRadius:16,border:`1px solid ${match?"#bbf7d0":"#fed7aa"}`}}>
+              <div style={{fontSize:12,fontWeight:800,color:match?"#166534":"#9a3412",letterSpacing:"0.04em",marginBottom:6}}>{gapAnalysis.title}</div>
+              <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>{gapAnalysis.summary}</div>
+              {gapAnalysis.reasons?.length>0&&<div style={{marginTop:10,display:"grid",gap:6}}>
+                {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
+              </div>}
+            </div>}
           </div>
-          {learningMsg&&<div style={{fontSize:12,color:T.text3,lineHeight:1.75,marginBottom:10}}>{learningMsg}</div>}
-          <div style={{padding:"14px 16px",background:T.navActive,borderRadius:16,border:`1px solid ${T.border}`}}>
-            <div style={{fontSize:12,color:T.text3,lineHeight:1.85}}>
-              <strong style={{color:T.text}}>如何让 AI 越来越懂你：</strong><br/>
-              积累 <strong style={{color:T.accent}}>10个以上</strong> 案例后，AI 对你用人偏好的理解会显著提升。不同判断（尤其和 AI 意见不一致的案例）价值最高。
+
+          <div style={{paddingTop:16,borderTop:`1px solid ${T.border}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>学习沉淀</div>
+                <div style={{fontSize:12,color:T.text4,lineHeight:1.75}}>
+                  当前岗位已沉淀 {Number(learning?.sampleCount)||0} 条样本
+                  {learning?.rubricVersion?` · 规则 v${learning.rubricVersion}`:" · 暂无规则版本"}
+                  {learning?.questionBankVersion?` · 题库 v${learning.questionBankVersion}`:" · 暂无题库版本"}
+                </div>
+              </div>
+              {learningState?.loading&&<Chip c="#2563eb" bg="#eff6ff">学习数据加载中</Chip>}
+              {!learningState?.loading&&learning?.rubricVersion&&<Chip c="#059669" bg="#ecfdf5">已启用学习规则</Chip>}
+            </div>
+            {learningMsg&&<div style={{fontSize:12,color:T.text3,lineHeight:1.75,marginBottom:10}}>{learningMsg}</div>}
+            <div style={{padding:"14px 16px",background:"#ffffff",borderRadius:16,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.85}}>
+                <strong style={{color:T.text}}>如何让 AI 越来越懂你：</strong><br/>
+                积累 <strong style={{color:T.accent}}>10 个以上</strong> 案例后，AI 对你用人偏好的理解会明显提升。和 AI 意见不一致的案例价值最高。
+              </div>
             </div>
           </div>
         </div>
@@ -5591,42 +5686,85 @@ function ResultTab({T,cand}) {
     borderRadius:18,
     boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
   };
+  const resultShell={
+    ...panel,
+    padding:0,
+    overflow:"hidden",
+  };
   return(<div>
-    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.15fr) minmax(320px,0.85fr)",gap:16,alignItems:"start",marginBottom:16}}>
-      <div style={{...panel,padding:"20px 22px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap",marginBottom:14}}>
-          <div>
-            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>评估结果总览</div>
-            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75}}>完成 {ivs.length} 轮面试后，系统会把面试评估、人工判断和分歧点收在这里，方便你最后回看。</div>
-          </div>
-          <div style={{padding:"12px 14px",borderRadius:16,background:T.card2,border:`1px solid ${T.border}`,minWidth:180}}>
-            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>AI 最终评分</div>
-            <div style={{fontSize:34,fontWeight:950,color:scColor(lat.assessment.score),lineHeight:1}}>{lat.assessment.score?.toFixed(1)}</div>
-            <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+    <div style={{...panel,padding:"18px 20px 16px",marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.14fr) minmax(280px,0.86fr)",gap:16,alignItems:"start"}}>
+        <div>
+          <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>评估结果总览</div>
+          <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:760}}>这里把面试评估、人工最终结论和判断分歧收在一处。你可以先看最终是否推进，再回看每轮为什么会通过、待定或淘汰。</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+            <Chip c={aiChip.c} bg={aiChip.bg}>{`AI建议：${aiRec}`}</Chip>
+            <Chip c={humanVerdict?humanChip.c:T.text4} bg={humanVerdict?humanChip.bg:T.card2}>
+              {humanVerdict?`人工最终：${humanVerdict}`:"等待人工判断"}
+            </Chip>
+            <Chip c={gapAnalysis?(gapAnalysis.same?"#059669":"#c2410c"):T.text4} bg={gapAnalysis?(gapAnalysis.same?"#ecfdf5":"#fff7ed"):T.card2}>
+              {gapAnalysis?(gapAnalysis.same?"判断一致":"判断不一致"):"等待分歧分析"}
+            </Chip>
           </div>
         </div>
-        <div style={{fontSize:13,color:T.text2,lineHeight:1.85}}>{lat.assessment.suggestion}</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginTop:16}}>
-          <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
-            <Chip c={aiChip.c} bg={aiChip.bg} lg>{aiRec}</Chip>
-          </div>
-          <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
-            <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
-            <Chip c={humanVerdict?humanChip.c:T.text4} bg={humanVerdict?humanChip.bg:T.card2} lg>{humanVerdict||"待面试官/总监确认"}</Chip>
+        <div style={{padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
+          <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>轮次摘要</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginTop:10}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>已完成面试</div>
+              <div style={{fontSize:18,fontWeight:900,color:T.text,marginTop:6}}>{ivs.length}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>最新评分</div>
+              <div style={{fontSize:18,fontWeight:900,color:scColor(lat.assessment.score),marginTop:6}}>{lat.assessment.score?.toFixed(1)}</div>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前结论</div>
+              <div style={{fontSize:18,fontWeight:900,color:humanVerdict?humanChip.c:aiChip.c,marginTop:6}}>{humanVerdict||aiRec}</div>
+            </div>
           </div>
         </div>
       </div>
-      <div style={{...panel,padding:"20px 20px 18px",borderLeft:`4px solid ${gapAnalysis?(gapAnalysis.same?"#16a34a":"#ea580c"):T.border}`}}>
-        <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:8}}>
-          {gapAnalysis?(gapAnalysis.same?"AI 与人工判断一致":"AI 与人工判断不一致"):"等待人工判断"}
+    </div>
+    <div style={{...resultShell,marginBottom:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.18fr) minmax(320px,0.82fr)",alignItems:"stretch"}}>
+        <div style={{padding:"22px 24px 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16,flexWrap:"wrap",marginBottom:14}}>
+            <div>
+              <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>最终结论与推进建议</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75}}>完成 {ivs.length} 轮面试后，把 AI 建议、人工最终判断和当下建议动作收在一处。先看这次要不要推进，再回头复盘每轮为什么会通过、待定或淘汰。</div>
+            </div>
+            <div style={{padding:"12px 14px",borderRadius:16,background:T.card2,border:`1px solid ${T.border}`,minWidth:180}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>AI 最终评分</div>
+              <div style={{fontSize:34,fontWeight:950,color:scColor(lat.assessment.score),lineHeight:1}}>{lat.assessment.score?.toFixed(1)}</div>
+              <div style={{fontSize:11,color:T.text4,marginTop:4}}>/ 5.0</div>
+            </div>
+          </div>
+          <div style={{fontSize:13,color:T.text2,lineHeight:1.85,marginBottom:16}}>{lat.assessment.suggestion}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
+              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>AI 录用建议</div>
+              <Chip c={aiChip.c} bg={aiChip.bg} lg>{aiRec}</Chip>
+            </div>
+            <div style={{padding:"16px 14px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:16}}>
+              <div style={{fontSize:11,color:T.text4,marginBottom:6}}>最终结果（面试官/总监）</div>
+              <Chip c={humanVerdict?humanChip.c:T.text4} bg={humanVerdict?humanChip.bg:T.card2} lg>{humanVerdict||"待面试官/总监确认"}</Chip>
+            </div>
+          </div>
         </div>
-        <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>
-          {gapAnalysis?gapAnalysis.summary:"总监/面试官给出最终结论后，这里会自动生成分歧分析，解释为什么 AI 和人工会一致或不一致。"}
+        <div style={{padding:"22px 20px 20px",background:"#fcfdff",borderLeft:`1px solid ${T.border}`,display:"grid",alignContent:"start"}}>
+          <div style={{padding:"16px 16px 14px",background:"#ffffff",border:`1px solid ${gapAnalysis?(gapAnalysis.same?"#bbf7d0":"#fed7aa"):T.border}`,borderRadius:18}}>
+            <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:8}}>
+              {gapAnalysis?(gapAnalysis.same?"AI 与人工判断一致":"AI 与人工判断不一致"):"等待人工判断"}
+            </div>
+            <div style={{fontSize:12,color:T.text2,lineHeight:1.85}}>
+              {gapAnalysis?gapAnalysis.summary:"总监/面试官给出最终结论后，这里会自动生成分歧分析，解释为什么 AI 和人工会一致或不一致。"}
+            </div>
+            {gapAnalysis?.reasons?.length>0&&<div style={{marginTop:12,display:"grid",gap:6}}>
+              {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
+            </div>}
+          </div>
         </div>
-        {gapAnalysis?.reasons?.length>0&&<div style={{marginTop:12,display:"grid",gap:6}}>
-          {gapAnalysis.reasons.map((item,index)=><div key={index} style={{fontSize:12,color:T.text2,lineHeight:1.75}}>• {item}</div>)}
-        </div>}
       </div>
     </div>
     <div style={{fontSize:12,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>轮次回放</div>
