@@ -712,12 +712,51 @@ const getEffectiveCandidateJob = (jobs, cand) => {
   return resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
 };
 
-const normalizeCompareMetricText = text => cleanListLine(text || "")
-  .toLowerCase()
-  .replace(/[，,。；;：:（）()【】[\]《》<>“”"'`]/g, "")
-  .replace(/\s+/g, "")
-  .replace(/该品类达人|该品类|相关经验|相关能力|合作模式|报价体系/g, match => match)
-  .replace(/具备|拥有|有一定的|一定的|能够|可以|独立|熟悉|了解|经验|能力|相关|以及|并且|进行|完成|较强|很强|强/g, "");
+const COMPARE_METRIC_SYNONYMS = [
+  [/该品类达人/g, "达人"],
+  [/该品类/g, ""],
+  [/相关经验|相关能力/g, ""],
+  [/合作模式|合作方式/g, "合作"],
+  [/报价体系|报价机制/g, "报价"],
+  [/gmv|成交额|销售额/g, "业绩"],
+  [/平台资源|平台经验/g, "平台"],
+  [/独立全流程|独立完成从建联到成交的全流程/g, "全流程执行"],
+  [/沟通谈判与关系维护|沟通谈判能力强/g, "沟通谈判"],
+  [/抗压与目标接受度|抗压能力强|能接受gmv目标考核/g, "抗压目标"],
+  [/业绩与数据分析能力|数据分析能力/g, "数据分析"],
+];
+
+const COMPARE_METRIC_CONCEPTS = [
+  "达人","美妆","个护","护肤","合作","报价","平台","资源","快手","抖音","小红书",
+  "全流程执行","执行","沟通谈判","关系维护","数据分析","业绩","抗压目标","管理",
+  "建联","成交","活动","货盘","投流","素材","脚本","剪辑","直播","选品","转化",
+];
+
+const normalizeCompareMetricText = text => {
+  let normalized = cleanListLine(text || "")
+    .toLowerCase()
+    .replace(/[，,。；;：:（）()【】[\]《》<>“”"'`]/g, "")
+    .replace(/\s+/g, "");
+  COMPARE_METRIC_SYNONYMS.forEach(([pattern, replacement]) => {
+    normalized = normalized.replace(pattern, replacement);
+  });
+  return normalized.replace(/具备|拥有|有一定的|一定的|能够|可以|独立|熟悉|了解|经验|能力|相关|以及|并且|进行|完成|较强|很强|强/g, "");
+};
+
+const extractCompareMetricConcepts = text => {
+  const normalized = normalizeCompareMetricText(text);
+  const concepts = new Set();
+  COMPARE_METRIC_CONCEPTS.forEach(token => {
+    if (normalized.includes(token)) concepts.add(token);
+  });
+  return concepts;
+};
+
+const buildCompareMetricKey = text => {
+  const concepts = [...extractCompareMetricConcepts(text)].sort();
+  if (concepts.length) return concepts.join("|");
+  return normalizeCompareMetricText(text);
+};
 
 const buildCompareMetricGrams = text => {
   const src = normalizeCompareMetricText(text);
@@ -733,6 +772,16 @@ const compareMetricSimilarity = (left, right) => {
   if (!a || !b) return 0;
   if (a === b) return 1;
   if (a.includes(b) || b.includes(a)) return 0.9;
+  const conceptsA = extractCompareMetricConcepts(left);
+  const conceptsB = extractCompareMetricConcepts(right);
+  if (conceptsA.size && conceptsB.size) {
+    const union = new Set([...conceptsA, ...conceptsB]);
+    let inter = 0;
+    conceptsA.forEach(token => { if (conceptsB.has(token)) inter += 1; });
+    const conceptScore = inter / union.size;
+    if (conceptScore >= 0.8) return Math.max(0.86, conceptScore);
+    if (conceptScore >= 0.6) return Math.max(0.74, conceptScore);
+  }
   const gramsA = buildCompareMetricGrams(a);
   const gramsB = buildCompareMetricGrams(b);
   const union = new Set([...gramsA, ...gramsB]);
@@ -763,12 +812,18 @@ const buildCompareRows = (cands, jobs, type = "t0") => {
   const ensureRow = (label, preferCanonical = false) => {
     const cleaned = cleanListLine(label || "");
     if (!cleaned) return null;
+    const key = buildCompareMetricKey(cleaned);
+    const keyed = rows.find(row => row.metricKey === key && key);
+    if (keyed) {
+      if (preferCanonical && keyed.label.length < cleaned.length) keyed.label = cleaned;
+      return keyed;
+    }
     const existing = findRow(cleaned);
     if (existing) {
       if (preferCanonical && existing.label.length < cleaned.length) existing.label = cleaned;
       return existing;
     }
-    const row = { key: `${type}-${rows.length}-${cleaned}`, label: cleaned };
+    const row = { key: `${type}-${rows.length}-${cleaned}`, label: cleaned, metricKey: key };
     rows.push(row);
     return row;
   };
@@ -788,11 +843,12 @@ const buildCompareRows = (cands, jobs, type = "t0") => {
           if (!memo || score > memo.score) return { item, score };
           return memo;
         }, null);
-        return [candidate.id, best && best.score >= 0.52 ? best.item : null];
+        return [candidate.id, best && best.score >= 0.46 ? best.item : null];
       }));
-      return { ...row, values };
+      const comparableCount = cands.filter(candidate => values[candidate.id]).length;
+      return { ...row, values, comparableCount };
     })
-    .filter(row => cands.some(candidate => row.values[candidate.id]));
+    .filter(row => row.comparableCount >= Math.min(2, cands.length));
 };
 
 const buildScreeningPrompt = (job, resume, learningCtx="", jobOptions=[]) => {
@@ -3100,6 +3156,7 @@ function CompareModal({T,ids,cands,jobs,onClose}) {
   const cs=ids.map(id=>cands.find(c=>c.id===id)).filter(Boolean);
   const t0Rows=useMemo(()=>buildCompareRows(cs,jobs,"t0"),[cs,jobs]);
   const t1Rows=useMemo(()=>buildCompareRows(cs,jobs,"t1"),[cs,jobs]);
+  const hasSharedMetrics = t0Rows.length || t1Rows.length;
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:200,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"40px 20px",overflowY:"auto"}} onClick={onClose}>
       <div style={{background:T.surface,borderRadius:16,width:"100%",maxWidth:920,padding:26,boxShadow:"0 24px 80px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
@@ -3127,8 +3184,11 @@ function CompareModal({T,ids,cands,jobs,onClose}) {
             );
           })}
         </div>
+        {!hasSharedMetrics&&<div style={{padding:"12px 14px",marginBottom:16,background:"#f8fafc",border:`1px solid ${T.border}`,borderRadius:12,fontSize:12,color:T.text3,lineHeight:1.8}}>
+          当前只展示可互相对齐的共同维度。如果两位候选人来自不同岗位、或当前评估维度差异过大，建议先切到同岗位候选人再做对比。
+        </div>}
         {/* T0 */}
-        {t0Rows.length>0&&<CmpSec T={T} label="T0 硬性条件">
+        {t0Rows.length>0&&<CmpSec T={T} label="T0 硬性条件（共同维度）">
           {t0Rows.map(row=>(
             <div key={row.key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
               <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{row.label}</div>
@@ -3137,7 +3197,7 @@ function CompareModal({T,ids,cands,jobs,onClose}) {
           ))}
         </CmpSec>}
         {/* T1 */}
-        {t1Rows.length>0&&<CmpSec T={T} label="T1 核心评分">
+        {t1Rows.length>0&&<CmpSec T={T} label="T1 核心评分（共同维度）">
           {t1Rows.map(row=>(
             <div key={row.key} style={{display:"grid",gridTemplateColumns:`140px repeat(${cs.length},1fr)`,gap:12,padding:"8px 0",borderBottom:`1px solid ${T.border}`}}>
               <div style={{fontSize:12,color:T.text3,alignSelf:"center"}}>{row.label}</div>
@@ -3164,8 +3224,8 @@ const CmpSec=({T,label,children})=>(
 );
 const CmpScore=({it})=>{
   if(!it) return <div style={{textAlign:"center"}}>
-    <div style={{fontSize:12,fontWeight:700,color:"#cbd5e1"}}>未覆盖</div>
-    <div style={{fontSize:11,color:"#cbd5e1",marginTop:2}}>未评到该维度</div>
+    <div style={{fontSize:12,fontWeight:700,color:"#94a3b8"}}>待核验</div>
+    <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>该候选人当前未评到这一共同维度</div>
   </div>;
   const pct=(it.score/(it.maxScore||5))*100;
   const c=scColor(it.score,it.maxScore||5);
