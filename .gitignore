@@ -4,3 +4,9 @@ dist
 .env
 .env.local
 .env.production
+.omx/
+AGENTS.md
+kuaishou-app-link
+tmp-codex-skill-imports/
+tmp-codex-skill-noexcel/
+tmp-codex-skill-upgrade/
