@@ -4750,6 +4750,31 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
   const learningHint = formatRubricContext(learning);
+  const workPanel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+  };
+  const workspaceShell={
+    ...workPanel,
+    padding:0,
+    overflow:"hidden",
+  };
+  const workspaceRail={
+    padding:"20px 18px 18px",
+    background:"#fcfdff",
+    borderLeft:`1px solid ${T.border}`,
+    display:"grid",
+    gap:16,
+    alignContent:"start",
+  };
+  const railCard={
+    padding:"14px 16px",
+    background:"#ffffff",
+    border:`1px solid ${T.border}`,
+    borderRadius:16,
+  };
 
   useEffect(()=>{
     setName(cand.name||"");
@@ -4824,56 +4849,114 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
 
   const scr=cand.screening;
   return(<div>
-    {!scr&&(<SCard T={T} title="输入候选人信息">
-      <Inp T={T} label="候选人姓名" placeholder="姓名（可选）" value={name} onChange={e=>setName(e.target.value)}/>
-      <div style={{display:"flex",gap:0,marginBottom:12,border:`1px solid ${T.border2}`,borderRadius:8,overflow:"hidden",width:"fit-content"}}>
-        {[["file","📄 上传简历文件"],["text","✏️ 粘贴文字"]].map(([mode,label])=>(
-          <button key={mode} onClick={()=>setInputMode(mode)}
-            style={{padding:"7px 16px",border:"none",background:inputMode===mode?T.accent:T.inputBg,color:inputMode===mode?T.accentFg:T.text3,cursor:"pointer",fontSize:12,fontWeight:inputMode===mode?700:400}}>
-            {label}
-          </button>
-        ))}
+    {!scr&&(<div>
+      <div style={{...workPanel,padding:"18px 20px 16px",marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.12fr) minmax(260px,0.88fr)",gap:16,alignItems:"start"}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>简历筛选工作台</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:760}}>先把候选人资料和简历收进来，再让系统按岗位要求做首轮判断。左侧负责输入与上传，右侧给你看当前状态、岗位上下文和本轮筛选会参考的规则。</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+              <Chip c={resumeFileName?"#16a34a":T.text3} bg={resumeFileName?"#ecfdf5":T.card2}>
+                {resumeFileName?`已载入：${resumeFileName}`:"待上传原始简历"}
+              </Chip>
+              <Chip c={inputMode==="file"?"#1d4ed8":T.text3} bg={inputMode==="file"?"#dbeafe":T.card2}>{inputMode==="file"?"文件模式":"文字模式"}</Chip>
+              <Chip c={loading?"#7c3aed":T.text3} bg={loading?"#f5f3ff":T.card2}>{loading?"后台筛选中":"等待开始分析"}</Chip>
+            </div>
+          </div>
+          <div style={railCard}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>当前候选人快照</div>
+            <div style={{fontSize:15,fontWeight:800,color:T.text}}>{name||cand.name||"未命名候选人"}</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.75}}>
+              当前岗位：{job?.title||cand.screening?.matchedJobTitle||"待匹配"}<br/>
+              已有简历文本：{(resume||cand.resume)?.trim()?"已识别":"未录入"}
+            </div>
+          </div>
+        </div>
       </div>
-      {inputMode==="file"&&<div style={{marginBottom:12,padding:"12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:10}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-          <label style={{...lbSt(T),marginBottom:0}}>上传简历文件（AI 自动识别并规整）</label>
-          <button onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
-            style={{padding:"7px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:8,cursor:loading?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:loading?0.5:1}}>
-            上传简历文件
-          </button>
+
+      <div style={workspaceShell}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.18fr) minmax(300px,0.82fr)",alignItems:"stretch"}}>
+          <div style={{padding:"20px 22px 18px"}}>
+            <div style={{display:"flex",gap:0,marginBottom:14,border:`1px solid ${T.border2}`,borderRadius:10,overflow:"hidden",width:"fit-content"}}>
+              {[["file","📄 上传简历文件"],["text","✏️ 粘贴文字"]].map(([mode,label])=>(
+                <button key={mode} onClick={()=>setInputMode(mode)}
+                  style={{padding:"8px 16px",border:"none",background:inputMode===mode?T.accent:T.inputBg,color:inputMode===mode?T.accentFg:T.text3,cursor:"pointer",fontSize:12,fontWeight:inputMode===mode?700:500}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <Inp T={T} label="候选人姓名" placeholder="姓名（可选）" value={name} onChange={e=>setName(e.target.value)}/>
+
+            {inputMode==="file"&&<div style={{marginBottom:14,padding:"14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+                <label style={{...lbSt(T),marginBottom:0}}>上传简历文件（AI 自动识别并规整）</label>
+                <button onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
+                  style={{padding:"8px 12px",background:T.accent,color:T.accentFg,border:"none",borderRadius:9,cursor:loading?"not-allowed":"pointer",fontSize:12,fontWeight:700,opacity:loading?0.5:1}}>
+                  选择文件
+                </button>
+              </div>
+              <div
+                onDragOver={e=>{e.preventDefault();setDrag(true);}}
+                onDragLeave={()=>setDrag(false)}
+                onDrop={e=>{e.preventDefault();setDrag(false);queueResumeFile(e.dataTransfer.files?.[0]);}}
+                onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
+                style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:14,padding:"28px 16px",textAlign:"center",cursor:loading?"default":"pointer",background:drag?`${T.accent}10`:"#fbfcfe",transition:"all 0.15s"}}>
+                <input id={`resume-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}}
+                  onChange={e=>{queueResumeFile(e.target.files?.[0]);e.target.value="";}}/>
+                {loading
+                  ?<div><Spin text="正在识别并规整简历..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>会先抽取文字，再按岗位要求做智能筛选</div></div>
+                  :resumeFileName
+                    ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{resumeFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>可直接开始筛选，或继续替换文件</div></div>
+                    :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入简历文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>支持 PDF、图片、Word(.docx) 和纯文本简历</div></div>
+                }
+              </div>
+            </div>}
+
+            {inputMode==="text"&&<div style={{marginBottom:14}}>
+              <label style={lbSt(T)}>粘贴简历内容 *</label>
+              <textarea rows={13} value={resume} onChange={e=>setResume(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.7,background:"#fff"}} placeholder={"将简历文字粘贴到此处...\n包括：基本信息、教育背景、工作经历、技能特长等"}/>
+            </div>}
+
+            {err&&<ErrBox>{err}</ErrBox>}
+            {inputMode==="file"&&<BtnPrimary T={T} loading={loading} disabled={loading||(!resumeFile&&!resumeFileName)} onClick={analyzeFile}>{loading?<Spin text="AI 正在分析简历文件..."/>:"识别并智能筛选 →"}</BtnPrimary>}
+            {inputMode==="text"&&<BtnPrimary T={T} loading={loading} disabled={loading||!resume.trim()} onClick={analyzeText}>{loading?<Spin text="AI 正在分析简历..."/>:"AI 智能筛选 →"}</BtnPrimary>}
+          </div>
+
+          <div style={workspaceRail}>
+            <div style={railCard}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>筛选规则上下文</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>
+                系统会优先参考岗位要求、历史总监判断和已学习的风险规则来做首轮筛选，而不是只看简历关键词。
+              </div>
+            </div>
+            {dirCtx&&<div style={{...railCard,background:`linear-gradient(180deg, ${T.surface} 0%, ${T.accent}10 100%)`}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>历史判断标准</div>
+              <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}>已融入你的历史判断标准，AI 评估会更贴近你的用人偏好。</div>
+            </div>}
+            {learningState?.loading&&<div style={{...railCard,background:"#eff6ff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#2563eb",letterSpacing:"0.08em",marginBottom:8}}>学习规则载入中</div>
+              <div style={{fontSize:12,color:"#1d4ed8",lineHeight:1.8}}>正在加载该岗位最近沉淀出的硬门槛、风险信号与评分校准。</div>
+            </div>}
+            {!learningState?.loading&&learningHint&&<div style={{...railCard,background:"#ecfeff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#0f766e",letterSpacing:"0.08em",marginBottom:8}}>已加载岗位学习规则</div>
+              <div style={{fontSize:12,color:"#115e59",lineHeight:1.8}}>{learningHint}</div>
+            </div>}
+          </div>
         </div>
-        <div
-          onDragOver={e=>{e.preventDefault();setDrag(true);}}
-          onDragLeave={()=>setDrag(false)}
-          onDrop={e=>{e.preventDefault();setDrag(false);queueResumeFile(e.dataTransfer.files?.[0]);}}
-          onClick={()=>!loading&&document.getElementById(`resume-file-input-${cand.id}`)?.click()}
-          style={{border:`2px dashed ${drag?T.accent:T.border2}`,borderRadius:10,padding:"16px 14px",textAlign:"center",cursor:loading?"default":"pointer",background:drag?`${T.accent}10`:T.inputBg,transition:"all 0.15s"}}>
-          <input id={`resume-file-input-${cand.id}`} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,.docx,.txt,.md" style={{display:"none"}}
-            onChange={e=>{queueResumeFile(e.target.files?.[0]);e.target.value="";}}/>
-          {loading
-            ?<div><Spin text="正在识别并规整简历..." /><div style={{fontSize:11,color:T.text4,marginTop:6}}>会先抽取文字，再按岗位要求做智能筛选</div></div>
-            :resumeFileName
-              ?<div><div style={{fontSize:13,fontWeight:700,color:"#16a34a"}}>已选择：{resumeFileName}</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>可直接开始筛选，或重新上传替换文件</div></div>
-              :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入简历文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>支持 PDF、图片、Word(.docx) 和纯文本简历</div></div>
-          }
-        </div>
-      </div>}
-      {inputMode==="text"&&<div style={{marginBottom:12}}><label style={lbSt(T)}>粘贴简历内容 *</label>
-        <textarea rows={12} value={resume} onChange={e=>setResume(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.6}} placeholder={"将简历文字粘贴到此处...\n包括：基本信息、教育背景、工作经历、技能特长等"}/>
-      </div>}
-      {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:8,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入你的历史判断标准，AI评估将更贴近你的用人偏好</div>}
-      {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:8,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位的学习规则，当前会先按已有岗位要求筛选</div>}
-      {!learningState?.loading&&learningHint&&<div style={{fontSize:11,color:"#0f766e",marginBottom:8,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载该岗位学习规则，筛选会参考最新硬门槛、风险信号和评分校准</div>}
-      {err&&<ErrBox>{err}</ErrBox>}
-      {inputMode==="file"&&<BtnPrimary T={T} loading={loading} disabled={loading||(!resumeFile&&!resumeFileName)} onClick={analyzeFile}>{loading?<Spin text="AI 正在分析简历文件..."/>:"识别并智能筛选 →"}</BtnPrimary>}
-      {inputMode==="text"&&<BtnPrimary T={T} loading={loading} disabled={loading||!resume.trim()} onClick={analyzeText}>{loading?<Spin text="AI 正在分析简历..."/>:"AI 智能筛选 →"}</BtnPrimary>}
-    </SCard>)}
+      </div>
+    </div>)}
     {scr&&(<div>
-      <div style={{...cardSt(T),borderLeft:`4px solid ${recSt(scr.recommendation).c}`,marginBottom:14}}>
+      <div style={{...workPanel,padding:"18px 20px 16px",marginBottom:16,borderLeft:`4px solid ${recSt(scr.recommendation).c}`}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{flex:1,marginRight:20}}>
-            <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:7}}>筛选结论</div>
-            <div style={{fontSize:14,color:T.text2,lineHeight:1.7}}>{scr.summary}</div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em",marginBottom:8}}>筛选结论</div>
+            <div style={{fontSize:14,color:T.text2,lineHeight:1.8,maxWidth:860}}>{scr.summary}</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+              {cand.screening?.roleDirection&&<Chip c="#1d4ed8" bg="#dbeafe">{`识别岗位方向：${cand.screening.roleDirection}`}</Chip>}
+              {cand.screening?.matchedJobTitle&&<Chip c="#0f766e" bg="#ccfbf1">{`AI建议岗位：${cand.screening.matchedJobTitle}`}</Chip>}
+              {cand.screening?.matchedJobConfidence&&<Chip c="#7c3aed" bg="#f3e8ff">{`匹配置信度：${cand.screening.matchedJobConfidence}`}</Chip>}
+            </div>
           </div>
           <div style={{textAlign:"center",flexShrink:0}}>
             <div style={{fontSize:42,fontWeight:900,lineHeight:1,color:scColor(scr.overallScore)}}>{scr.overallScore?.toFixed(1)}</div>
@@ -4882,34 +4965,56 @@ function ScreenTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learning
           </div>
         </div>
       </div>
-      <ScoreSection T={T} title={`T0 硬性条件  ${scr.t0?.score?.toFixed(1)||"—"}/5.0`}>
-        {scr.t0?.items?.map((it,i)=><ScoreBar key={i} T={T} label={it.requirement} score={it.score} max={it.maxScore} badge={it.level} note={it.note}/>)}
-      </ScoreSection>
-      <ScoreSection T={T} title="T1 核心评分">
-        {scr.t1?.items?.map((it,i)=><ScoreBar key={i} T={T} label={it.dimension} score={it.score} max={it.maxScore} note={it.note}/>)}
-      </ScoreSection>
-      {scr.t2?.items?.length>0&&<ScoreSection T={T} title="T2 加分项">
-        {scr.t2.items.map((it,i)=>(<div key={i} style={{display:"flex",gap:9,padding:"9px 0",borderBottom:`1px solid ${T.border}`,alignItems:"flex-start"}}>
-          <span style={{fontSize:15,color:it.has?"#16a34a":T.border2,flexShrink:0}}>{it.has?"✓":"○"}</span>
-          <div><div style={{fontSize:13,color:it.has?T.text:T.text4,fontWeight:500}}>{it.item}</div><div style={{fontSize:11,color:T.text4,marginTop:2}}>{it.note}</div></div>
-        </div>))}
-      </ScoreSection>}
-      <ScoreSection T={T} title="精细化筛选">
-        {[["学历匹配度",scr.fineScreen?.education],["行业跨度风险",scr.fineScreen?.industryRisk],["工作年限匹配",scr.fineScreen?.tenureMatch],["薪酬合理性",scr.fineScreen?.salaryReason]].filter(([,v])=>v).map(([l,v])=>(
-          <ScoreBar key={l} T={T} label={l} score={v.score} max={v.maxScore} note={v.note}/>
-        ))}
-      </ScoreSection>
-      {scr.risks?.length>0&&<div style={{...cardSt(T),background:"#fffbeb",borderLeft:"4px solid #d97706",marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:7}}>▲ 风险提示</div>
-        {scr.risks.map((r,i)=><div key={i} style={{fontSize:13,color:"#78350f",padding:"2px 0"}}>• {r}</div>)}
-      </div>}
-      <button onClick={()=>{
-        setErr("");
-        setResumeFile(null);
-        setResumeFileName(cand.resumeFileName||"");
-        setInputMode(cand.resumeFileName?"file":"text");
-        updCand(cand.id,{screening:null,questions:null});
-      }} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新筛选</button>
+
+      <div style={workspaceShell}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(300px,0.8fr)",alignItems:"stretch"}}>
+          <div style={{padding:"20px 22px 18px"}}>
+            <ScoreSection T={T} title={`T0 硬性条件  ${scr.t0?.score?.toFixed(1)||"—"}/5.0`}>
+              {scr.t0?.items?.map((it,i)=><ScoreBar key={i} T={T} label={it.requirement} score={it.score} max={it.maxScore} badge={it.level} note={it.note}/>)}
+            </ScoreSection>
+            <ScoreSection T={T} title="T1 核心评分">
+              {scr.t1?.items?.map((it,i)=><ScoreBar key={i} T={T} label={it.dimension} score={it.score} max={it.maxScore} note={it.note}/>)}
+            </ScoreSection>
+            {scr.t2?.items?.length>0&&<ScoreSection T={T} title="T2 加分项">
+              {scr.t2.items.map((it,i)=>(<div key={i} style={{display:"flex",gap:9,padding:"9px 0",borderBottom:`1px solid ${T.border}`,alignItems:"flex-start"}}>
+                <span style={{fontSize:15,color:it.has?"#16a34a":T.border2,flexShrink:0}}>{it.has?"✓":"○"}</span>
+                <div><div style={{fontSize:13,color:it.has?T.text:T.text4,fontWeight:500}}>{it.item}</div><div style={{fontSize:11,color:T.text4,marginTop:2}}>{it.note}</div></div>
+              </div>))}
+            </ScoreSection>}
+            <ScoreSection T={T} title="精细化筛选">
+              {[["学历匹配度",scr.fineScreen?.education],["行业跨度风险",scr.fineScreen?.industryRisk],["工作年限匹配",scr.fineScreen?.tenureMatch],["薪酬合理性",scr.fineScreen?.salaryReason]].filter(([,v])=>v).map(([l,v])=>(
+                <ScoreBar key={l} T={T} label={l} score={v.score} max={v.maxScore} note={v.note}/>
+              ))}
+            </ScoreSection>
+          </div>
+
+          <div style={workspaceRail}>
+            <div style={railCard}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>筛选结论摘要</div>
+              <div style={{display:"grid",gap:10}}>
+                <div style={{fontSize:12,color:T.text2,lineHeight:1.75}}>当前建议：<strong style={{color:T.text}}>{scr.recommendation}</strong></div>
+                {scr.matchedJobReason&&<div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>{scr.matchedJobReason}</div>}
+              </div>
+            </div>
+            {scr.risks?.length>0&&<div style={{...railCard,background:"#fffbeb",borderColor:"#fed7aa"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#92400e",letterSpacing:"0.08em",marginBottom:8}}>风险提示</div>
+              <div style={{display:"grid",gap:6}}>
+                {scr.risks.map((r,i)=><div key={i} style={{fontSize:12,color:"#78350f",lineHeight:1.75}}>• {r}</div>)}
+              </div>
+            </div>}
+            <div style={railCard}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>快速操作</div>
+              <button onClick={()=>{
+                setErr("");
+                setResumeFile(null);
+                setResumeFileName(cand.resumeFileName||"");
+                setInputMode(cand.resumeFileName?"file":"text");
+                updCand(cand.id,{screening:null,questions:null});
+              }} style={{width:"100%",padding:"11px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:10,color:T.text3,cursor:"pointer",fontSize:12,fontWeight:700}}>重新筛选</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>)}
   </div>);
 }
@@ -4919,6 +5024,31 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
   const loading=!!questionTask?.loading;
   const err=questionTask?.error||"";
   const feedbackHistory = mergeQuestionFeedbackHistory(cand.questionFeedbackHistory, cand.questions || []);
+  const workPanel={
+    background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
+    border:`1px solid ${T.border}`,
+    borderRadius:18,
+    boxShadow:"0 14px 32px rgba(15,23,42,0.06)",
+  };
+  const workspaceShell={
+    ...workPanel,
+    padding:0,
+    overflow:"hidden",
+  };
+  const workspaceRail={
+    padding:"20px 18px 18px",
+    background:"#fcfdff",
+    borderLeft:`1px solid ${T.border}`,
+    display:"grid",
+    gap:16,
+    alignContent:"start",
+  };
+  const railCard={
+    padding:"14px 16px",
+    background:"#ffffff",
+    border:`1px solid ${T.border}`,
+    borderRadius:16,
+  };
   const updateQuestionFeedback=(index,patch)=>{
     const next=(cand.questions||[]).map((item,i)=>i===index?{...item,...patch}:item);
     updCand(cand.id,{
@@ -4930,32 +5060,111 @@ function QuestionTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,learning,learni
     startQuestionGeneration?.(cand,job,learning);
   };
   const qs=cand.questions;
+  const questionCount = qs?.length || 0;
+  const questionSteps = qs ? [...new Set(qs.map(q=>Number(q.step)||0))].sort((a,b)=>a-b) : [];
+  const highValueCount = (qs||[]).filter(q=>q.feedbackTag==="high_value").length;
+  const blockedCount = (feedbackHistory||[]).filter(item=>["duplicate","invalid","remove"].includes(item?.feedbackTag)).length;
   return(<div>
-    {!qs?(<SCard T={T} title="生成面试题">
-      <div style={{fontSize:13,color:T.text3,marginBottom:14}}>基于岗位要求和简历分析，AI 生成结构化面试题，含好/差/红旗回答参考</div>
-      {dirCtx&&<div style={{fontSize:11,color:T.accent,marginBottom:10,padding:"6px 10px",background:`${T.accent}10`,borderRadius:6}}>✦ 已融入总监历史判断标准，面试题将更贴近你的用人偏好</div>}
-      {learningState?.loading&&<div style={{fontSize:11,color:"#2563eb",marginBottom:10,padding:"6px 10px",background:"#eff6ff",borderRadius:6}}>✦ 正在加载该岗位最新规则与题库，当前先按岗位要求生成面试题</div>}
-      {!learningState?.loading&&formatQuestionBankContext(learning)&&<div style={{fontSize:11,color:"#0f766e",marginBottom:10,padding:"6px 10px",background:"#ecfeff",borderRadius:6}}>✦ 已加载学习后的题库偏好，面试题会优先覆盖高区分度问题和风险排查</div>}
-      {!!feedbackHistory.length&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:10,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 本候选人上一轮题目反馈已生效：重复/无效题会被避开，高价值题会优先保留相近问法。</div>}
-      {loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:10,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 面试题正在后台生成中。你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>}
-      {err&&<ErrBox>{err}</ErrBox>}
-      <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
-    </SCard>):(<div>
-      {questionTask?.loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:12,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 正在后台重新生成面试题。你切换页面后任务仍会继续。</div>}
-      <div style={{fontSize:12,color:T.text4,marginBottom:12,padding:"8px 10px",background:T.card2,borderRadius:8}}>
-        面试后可直接给每道题打标：高价值 / 一般 / 重复 / 无效。系统后续会把这些反馈沉淀进岗位题库学习。
+    {!qs?(<div>
+      <div style={{...workPanel,padding:"18px 20px 16px",marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.08fr) minmax(260px,0.92fr)",gap:16,alignItems:"start"}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试题工作台</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:760}}>这里负责把岗位要求、简历锚点、历史反馈和题库偏好收成一套更具体的问题。系统会优先问真实经历、当前岗位最在意的能力，以及你上一轮反馈里觉得有价值的方向。</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+              <Chip c={loading?"#7c3aed":T.text3} bg={loading?"#f5f3ff":T.card2}>{loading?"后台生成中":"待生成题目"}</Chip>
+              <Chip c={feedbackHistory.length?"#0f766e":T.text3} bg={feedbackHistory.length?"#ccfbf1":T.card2}>{feedbackHistory.length?`已有 ${feedbackHistory.length} 条反馈`:"暂无历史反馈"}</Chip>
+            </div>
+          </div>
+          <div style={railCard}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>当前出题原则</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>系统会优先绑定简历真实经历、当前岗位模板和你的历史反馈，避免泛泛问题、重复题和明显跑偏的提问。</div>
+          </div>
+        </div>
       </div>
-      {[...new Set(qs.map(q=>Number(q.step)||0))].sort((a,b)=>a-b).map(step=>{
+      <div style={workspaceShell}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.18fr) minmax(300px,0.82fr)",alignItems:"stretch"}}>
+          <div style={{padding:"20px 22px 18px"}}>
+            <div style={{fontSize:14,color:T.text2,fontWeight:800,marginBottom:8}}>准备生成这一轮面试题</div>
+            <div style={{fontSize:13,color:T.text3,marginBottom:14,lineHeight:1.8}}>基于岗位要求和简历分析，AI 会生成结构化面试题，并补上考察目标、好/差回答、红旗回答与追问方向。</div>
+            {err&&<ErrBox>{err}</ErrBox>}
+            <BtnPrimary T={T} loading={loading} disabled={loading} onClick={gen}>{loading?<Spin text="生成中..."/>:"生成面试题 →"}</BtnPrimary>
+          </div>
+          <div style={workspaceRail}>
+            {dirCtx&&<div style={{...railCard,background:`linear-gradient(180deg, ${T.surface} 0%, ${T.accent}10 100%)`}}>
+              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>历史判断标准</div>
+              <div style={{fontSize:12,color:T.text2,lineHeight:1.8}}>已融入总监历史判断标准，面试题会更贴近你的用人偏好。</div>
+            </div>}
+            {learningState?.loading&&<div style={{...railCard,background:"#eff6ff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#2563eb",letterSpacing:"0.08em",marginBottom:8}}>题库规则载入中</div>
+              <div style={{fontSize:12,color:"#1d4ed8",lineHeight:1.8}}>正在加载该岗位最新规则与题库，当前先按岗位要求生成面试题。</div>
+            </div>}
+            {!learningState?.loading&&formatQuestionBankContext(learning)&&<div style={{...railCard,background:"#ecfeff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#0f766e",letterSpacing:"0.08em",marginBottom:8}}>已加载题库偏好</div>
+              <div style={{fontSize:12,color:"#115e59",lineHeight:1.8}}>已加载学习后的题库偏好，面试题会优先覆盖高区分度问题和风险排查。</div>
+            </div>}
+            {!!feedbackHistory.length&&<div style={{...railCard,background:"#f5f3ff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#7c3aed",letterSpacing:"0.08em",marginBottom:8}}>上一轮题目反馈</div>
+              <div style={{fontSize:12,color:"#6d28d9",lineHeight:1.8}}>重复/无效题会被避开，高价值题会优先保留相近问法。</div>
+            </div>}
+            {loading&&<div style={{...railCard,background:"#eef2ff"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#4338ca",letterSpacing:"0.08em",marginBottom:8}}>后台生成中</div>
+              <div style={{fontSize:12,color:"#4338ca",lineHeight:1.8}}>你现在切换到其他窗口也不会中断，回来后结果会自动保留。</div>
+            </div>}
+          </div>
+        </div>
+      </div>
+    </div>):(<div>
+      <div style={{...workPanel,padding:"18px 20px 16px",marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.08fr) minmax(260px,0.92fr)",gap:16,alignItems:"start"}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>本轮面试题总览</div>
+            <div style={{fontSize:12,color:T.text4,marginTop:6,lineHeight:1.8,maxWidth:760}}>题目会优先围绕岗位强匹配能力、候选人真实经历和历史反馈来出。你可以继续在下方逐题打标，系统会据此收敛下一轮问法。</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:12}}>
+              <Chip c="#1d4ed8" bg="#dbeafe">{`${questionCount} 道题`}</Chip>
+              <Chip c="#0f766e" bg="#ccfbf1">{`${questionSteps.length} 个步骤`}</Chip>
+              <Chip c={highValueCount?"#16a34a":T.text3} bg={highValueCount?"#dcfce7":T.card2}>{`高价值 ${highValueCount}`}</Chip>
+              <Chip c={blockedCount?"#b45309":T.text3} bg={blockedCount?"#fef3c7":T.card2}>{`已避开 ${blockedCount}`}</Chip>
+            </div>
+          </div>
+          <div style={railCard}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>当前生成口径</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>当前题目会优先绑定简历锚点和岗位风险点。你后面标成重复、无效或高价值的反馈，会直接影响下一轮重生。</div>
+          </div>
+        </div>
+      </div>
+
+      {questionTask?.loading&&<div style={{fontSize:11,color:"#7c3aed",marginBottom:12,padding:"6px 10px",background:"#f5f3ff",borderRadius:6}}>✦ 正在后台重新生成面试题。你切换页面后任务仍会继续。</div>}
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1.18fr) minmax(300px,0.82fr)",gap:16,alignItems:"start"}}>
+        <div>
+          {questionSteps.map(step=>{
         const sq=qs.map((q,index)=>({q,index})).filter(item=>item.q.step===step);
         return(<div key={step} style={{marginBottom:18}}>
           <div style={{fontSize:12,fontWeight:800,color:T.text2,padding:"9px 14px",background:"#f8fafc",borderRadius:10,marginBottom:10,border:`1px solid ${T.border}`,borderLeft:`4px solid ${T.accent}`,boxShadow:"0 6px 18px rgba(15,23,42,0.04)"}}>第{step}步 · {sq[0]?.q?.stepName}</div>
           {sq.map(({q,index})=><QCard key={`${step}-${index}`} T={T} q={q} sourceMeta={getQuestionBankSourceMeta(q, learning)} onFeedbackChange={patch=>updateQuestionFeedback(index,patch)}/>)}
         </div>);
       })}
-      <button onClick={()=>updCand(cand.id,{
-        questions:null,
-        questionFeedbackHistory:mergeQuestionFeedbackHistory(cand.questionFeedbackHistory,cand.questions||[]),
-      })} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
+          <button onClick={()=>updCand(cand.id,{
+            questions:null,
+            questionFeedbackHistory:mergeQuestionFeedbackHistory(cand.questionFeedbackHistory,cand.questions||[]),
+          })} style={{padding:"7px 14px",background:"transparent",border:`1px solid ${T.border2}`,borderRadius:7,color:T.text3,cursor:"pointer",fontSize:12}}>重新生成</button>
+        </div>
+
+        <div style={workspaceRail}>
+          <div style={railCard}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>使用说明</div>
+            <div style={{fontSize:12,color:T.text3,lineHeight:1.8}}>面试后可直接给每道题打标：高价值 / 一般 / 重复 / 无效。系统后续会把这些反馈沉淀进岗位题库学习。</div>
+          </div>
+          {feedbackHistory.length>0&&<div style={railCard}>
+            <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:8}}>候选人反馈快照</div>
+            <div style={{display:"grid",gap:8,fontSize:12,color:T.text3,lineHeight:1.8}}>
+              <div>累计反馈：{feedbackHistory.length} 条</div>
+              <div>高价值：{feedbackHistory.filter(item=>item.feedbackTag==="high_value").length} 条</div>
+              <div>重复 / 无效：{feedbackHistory.filter(item=>["duplicate","invalid","remove"].includes(item.feedbackTag)).length} 条</div>
+            </div>
+          </div>}
+        </div>
+      </div>
     </div>)}
   </div>);
 }
