@@ -328,7 +328,18 @@ export async function onRequest(context) {
   }
 
   if (request.method === "PUT") {
-    const body = await request.json().catch(() => null);
+    const rawBody = await request.text().catch(() => null);
+    if (typeof rawBody !== "string") return json({ error: "请求体不是合法 JSON" }, 400);
+    if (rawBody.length > 4 * 1024 * 1024) {
+      return json({ error: "请求体超过 4MB 限制" }, 413);
+    }
+    const body = (() => {
+      try {
+        return JSON.parse(rawBody);
+      } catch {
+        return null;
+      }
+    })();
     if (!body) return json({ error: "请求体不是合法 JSON" }, 400);
 
     const normalized = normalizeStatePayload(body);
