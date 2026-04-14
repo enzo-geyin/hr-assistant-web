@@ -20,10 +20,11 @@ async function handleRequest(request, env) {
   if (request.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
 
   const token = env.HR_PROXY_TOKEN || "";
-  if (token) {
-    const auth = request.headers.get("Authorization") || "";
-    if (auth !== `Bearer ${token}`) return json({ error: "代理访问令牌无效" }, 401);
+  if (!token) {
+    return json({ error: "服务端未设置 HR_PROXY_TOKEN，请在 Cloudflare 环境变量中配置后重试" }, 503);
   }
+  const auth = request.headers.get("Authorization") || "";
+  if (auth !== `Bearer ${token}`) return json({ error: "代理访问令牌无效" }, 401);
 
   const apiKey = env.OPENAI_API_KEY;
   if (!apiKey) {

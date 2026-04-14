@@ -66,7 +66,9 @@ function json(payload, status = 200) {
 
 function verifyToken(request, env) {
   const token = env.HR_PROXY_TOKEN || "";
-  if (!token) return null;
+  if (!token) {
+    return json({ error: "服务端未设置 HR_PROXY_TOKEN，请在 Cloudflare 环境变量中配置后重试" }, 503);
+  }
   const auth = request.headers.get("Authorization") || "";
   return auth === `Bearer ${token}` ? null : json({ error: "代理访问令牌无效" }, 401);
 }
