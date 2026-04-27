@@ -68,8 +68,8 @@ const PROVIDERS = {
   },
   deepseek: {
     name: "DeepSeek",
-    defaultModel: "deepseek-chat",
-    models: ["deepseek-chat", "deepseek-reasoner"],
+    defaultModel: "deepseek-v4-flash",
+    models: ["deepseek-v4-flash", "deepseek-v4-pro"],
     endpoint: "https://api.deepseek.com/v1/chat/completions",
     envKey: "DEEPSEEK_API_KEY",
     headers: apiKey => ({
@@ -84,8 +84,8 @@ const PROVIDERS = {
           { role: "system", content: system },
           { role: "user", content: user },
         ],
+        response_format: { type: "json_object" },
       };
-      if (model !== "deepseek-reasoner") body.response_format = { type: "json_object" };
       return body;
     },
     usage: data => ({
