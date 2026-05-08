@@ -5351,6 +5351,17 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setFileStage("queued");
   };
 
+  const extractSelectedNoteFile=async()=>{
+    if(!noteFile) return "";
+    const extracted=normalizeExtractedText(
+      getFileKind(noteFile)==="audio"
+        ? await transcribeAudioFile(cfg, noteFile)
+        : await extractFileText(noteFile)
+    ).slice(0,20000);
+    if(!extracted) throw new Error("未能从面试记录文件中提取到有效文字，请换一个更清晰的文件");
+    return extracted;
+  };
+
   const appendInterviewFile=async()=>{
     if(!noteFile){setLocalErr("请先上传面试记录文件");return;}
     setLocalErr("");
@@ -5358,12 +5369,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setFileLoading(true);
     setFileStage("processing");
     try{
-      const extracted=normalizeExtractedText(
-        getFileKind(noteFile)==="audio"
-          ? await transcribeAudioFile(cfg, noteFile)
-          : await extractFileText(noteFile)
-      ).slice(0,20000);
-      if(!extracted) throw new Error("未能从面试记录文件中提取到有效文字，请换一个更清晰的文件");
+      const extracted=await extractSelectedNoteFile();
       const merged=notes.trim()
         ? `${notes.trim()}\n\n【上传文件：${noteFile.name}】\n${extracted}`
         : `【上传文件：${noteFile.name}】\n${extracted}`;
@@ -5391,9 +5397,30 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   };
 
   const assess=async()=>{
-    if(!notes.trim()){setLocalErr("请填写面试笔记");return;}
     setLocalErr("");
-    startInterviewAssessment?.(cand,job,round,notes);
+    setFileInfo("");
+    let finalNotes=notes.trim();
+    if(noteFile && fileStage!=="done"){
+      setFileLoading(true);
+      setFileStage("processing");
+      try{
+        const extracted=await extractSelectedNoteFile();
+        finalNotes=finalNotes
+          ? `${finalNotes}\n\n【上传文件：${noteFile.name}】\n${extracted}`
+          : `【上传文件：${noteFile.name}】\n${extracted}`;
+        setNotes(finalNotes);
+        setFileInfo(`已识别并用于评估：${noteFile.name}`);
+        setFileStage("done");
+      }catch(error){
+        setLocalErr(error?.message||"面试记录文件识别失败");
+        setFileStage("failed");
+        setFileLoading(false);
+        return;
+      }
+      setFileLoading(false);
+    }
+    if(!finalNotes.trim()){setLocalErr("请填写面试笔记，或上传一份面试记录文件");return;}
+    startInterviewAssessment?.(cand,job,round,finalNotes);
   };
 
   return(<div>
@@ -5433,8 +5460,8 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
       {(cand.interviews||[]).map((ir,i)=><IRecord key={i} T={T} record={ir}/>)}
     </div>}
     <div style={{...workspaceShell,marginBottom:16}}>
-      <div style={{display:"grid",gridTemplateColumns:"minmax(320px,0.8fr) minmax(0,1.2fr)",alignItems:"stretch"}}>
-        <div style={workspaceRail}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(280px,360px) minmax(0,1fr)",alignItems:"stretch"}}>
+        <div style={{...workspaceRail,minWidth:0}}>
           <div>
             <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>安排面试</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -5480,7 +5507,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
               <div>
                 <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:6}}>面试材料</div>
-                <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>支持 PDF、图片、Word、txt / md 和录音，识别后会直接追加到右侧笔记。</div>
+              <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>支持 PDF、图片、Word、txt / md 和录音。材料和文字笔记属于同一份面试反馈，任选其一即可评估。</div>
               </div>
               {fileStage!=="idle"&&<span style={{padding:"5px 10px",borderRadius:999,fontSize:11,fontWeight:700,background:fileStageMeta.bg,color:fileStageMeta.color}}>{fileStageMeta.label}</span>}
             </div>
@@ -5498,7 +5525,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
                   :<div><div style={{fontSize:13,fontWeight:700,color:T.text}}>拖入面试记录文件，或点击上传</div><div style={{fontSize:11,color:T.text4,marginTop:4}}>适合上传面评表、会议纪要、txt / md 文本、录音与语音转写稿</div></div>}
             </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-              <div style={{fontSize:11,color:T.text4,lineHeight:1.7}}>{fileInfo||"上传后可将识别文字直接并入当前面试笔记"}</div>
+              <div style={{fontSize:11,color:T.text4,lineHeight:1.7}}>{fileInfo||"可先追加到笔记，也可以直接点击右侧 AI 评估"}</div>
               <button onClick={appendInterviewFile} disabled={fileLoading||!noteFile} style={{padding:"9px 12px",background:fileLoading||!noteFile?"#e5e7eb":T.accent,color:fileLoading||!noteFile?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:fileLoading||!noteFile?"not-allowed":"pointer",fontSize:12,fontWeight:800}}>
                 {fileLoading?"识别中...":"识别并追加到笔记"}
               </button>
@@ -5506,7 +5533,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
           </div>
         </div>
 
-        <div style={{padding:"20px 22px 18px"}}>
+        <div style={{padding:"20px 22px 18px",minWidth:0}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap",marginBottom:14}}>
             <div>
               <div style={{fontSize:17,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>面试笔记与综合评估</div>
@@ -5514,18 +5541,20 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
             </div>
             {loading&&<span style={{fontSize:11,color:"#2563eb",padding:"5px 10px",background:"#eff6ff",borderRadius:999,fontWeight:700}}>后台评估运行中</span>}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(220px,0.34fr)",gap:14,alignItems:"start",marginBottom:12}}>
+          <div style={{display:"grid",gap:14,alignItems:"start",marginBottom:12}}>
             <div>
-              <label style={lbSt(T)}>面试笔记 *</label>
+              <label style={lbSt(T)}>面试反馈 *</label>
               <textarea rows={15} value={notes} onChange={e=>setNotes(e.target.value)} style={{...inSt(T),resize:"vertical",lineHeight:1.8,background:"#fff"}}
                 placeholder={"记录候选人表现、回答要点、你的观察...\n例：\n- 自我介绍流畅，突出5年短视频经验\n- 团队协作举了具体项目，数据清晰（粉丝增长40%）\n- 离职原因：想要更大平台\n- 薪资期望20K，目前18K，有弹性"}/>
             </div>
-            <div style={{padding:"14px 16px",background:"#fbfcfe",border:`1px solid ${T.border}`,borderRadius:16}}>
-              <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>本轮评估提示</div>
-              <div style={{display:"grid",gap:10}}>
+            <div style={{padding:"12px 14px",background:"#fbfcfe",border:`1px solid ${T.border}`,borderRadius:14}}>
+              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(160px,auto)",gap:12,alignItems:"center"}}>
                 <div style={{fontSize:12,color:T.text3,lineHeight:1.75}}>优先记录候选人真实做过的事、你追问后的反应，以及现场最打动或最让你警惕的点。</div>
-                {dirCtx&&<div style={{fontSize:12,color:T.accent,lineHeight:1.75,padding:"10px 12px",background:`${T.accent}10`,borderRadius:12}}>AI 将参考你的历史判断标准进行评估。</div>}
-                {loading&&<div style={{fontSize:12,color:"#2563eb",lineHeight:1.75,padding:"10px 12px",background:"#eff6ff",borderRadius:12}}>面试综合评估正在后台运行中，切换窗口不会中断。</div>}
+                <div style={{display:"grid",gap:8}}>
+                  {dirCtx&&<div style={{fontSize:12,color:T.accent,lineHeight:1.75,padding:"8px 10px",background:`${T.accent}10`,borderRadius:10}}>AI 将参考你的历史判断标准。</div>}
+                  {loading&&<div style={{fontSize:12,color:"#2563eb",lineHeight:1.75,padding:"8px 10px",background:"#eff6ff",borderRadius:10}}>后台评估中，切换窗口不会中断。</div>}
+                  {!notes.trim()&&noteFile&&fileStage!=="done"&&<div style={{fontSize:12,color:"#7c3aed",lineHeight:1.75,padding:"8px 10px",background:"#f5f3ff",borderRadius:10}}>当前将先识别已选文件，再进行 AI 评估。</div>}
+                </div>
               </div>
             </div>
           </div>
@@ -5534,7 +5563,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
             <summary style={{fontSize:11,color:T.text4,cursor:"pointer"}}>查看模型原始返回</summary>
             <pre style={{marginTop:8,padding:"10px 12px",background:T.card2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:11,color:T.text2,whiteSpace:"pre-wrap",wordBreak:"break-word",lineHeight:1.6,maxHeight:220,overflow:"auto"}}>{rawErr}</pre>
           </details>}
-          <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||!notes.trim()} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:`AI ${round}综合评估 →`}</BtnPrimary>
+          <BtnPrimary T={T} loading={loading||fileLoading} disabled={loading||fileLoading||(!notes.trim()&&!noteFile)} onClick={assess}>{loading?<Spin text="AI 三源综合评估中..."/>:fileLoading?<Spin text="文件识别中..."/>:!notes.trim()&&noteFile?`识别文件并进行 ${round}评估 →`:`AI ${round}综合评估 →`}</BtnPrimary>
         </div>
       </div>
     </div>
