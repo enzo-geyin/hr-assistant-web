@@ -1932,6 +1932,17 @@ const buildLearningSample = (cand, job, verdict, reason) => {
     screeningSummary: cand.screening?.summary || "",
     questionFeedbackSummary: summarizeQuestionFeedback(cand.questions || []),
     interviewSummary: summarizeInterviews(cand),
+    interviewNotesRaw: ((cand.interviews || [])
+      .map((ir, idx) => {
+        const round = ir?.round || `第${idx+1}轮`;
+        const notes = String(ir?.notes || "").trim();
+        const loc = ir?.assessment?.summary ? `\n  评估摘要：${ir.assessment.summary}` : "";
+        if (!notes && !loc) return "";
+        return `[${round}]\n  笔记：${notes || "(无)"}${loc}`;
+      })
+      .filter(Boolean)
+      .join("\n\n")
+      .slice(0, 4000)) || "",
     mismatchType,
     deltaNotes,
     samplePayload: {
@@ -1959,12 +1970,13 @@ ${samples.map((sample, index) => `样本${index+1}：
 - 面试摘要：${sample.interviewSummary||"无"}
 - 题目反馈：${sample.questionFeedbackSummary||"无"}
 - 偏差类型：${sample.mismatchType||"无"}
-- 备注：${sample.deltaNotes||"无"}`).join("\n\n")}
+- 备注：${sample.deltaNotes||"无"}
+- 面试笔记原文：${sample.interviewNotesRaw||"无"}`).join("\n\n")}
 输出JSON：
 {"rubricSummary":"一句话总结这一岗位最新判断基准","rubric":{"hardRequirements":["硬门槛"],"coreDimensions":[{"dimension":"维度","weight":"高|中|低","note":"评分说明"}],"passSignals":["优先录用信号"],"redFlags":["高风险信号"],"calibrationTips":["避免误判的评分提醒"]},"questionBankSummary":"一句话总结最新题库策略","questionBank":{"highSignalQuestions":[{"question":"高价值问题","purpose":"为什么有效","targetSignal":"主要识别什么","step":"建议放在第几步"}],"questionPatterns":[{"pattern":"问题模板/提问方向","useWhen":"适用场景","why":"为什么有效"}],"followUpPatterns":[{"pattern":"追问方式","useWhen":"何时继续追问","why":"能挖出什么"}],"avoidQuestions":[{"question":"应该少问或淘汰的问题","reason":"为什么低效/重复/容易被套话"}]}}
 要求：
 1. 规则一定要能指导后续筛选和面试，不要空泛。
-2. 题库必须优先根据面试笔记和题目反馈，区分哪些题真正问出了信息、哪些题只是套话或重复。
+2. 题库必须优先消费"面试笔记原文"字段——从笔记中识别哪些问题真正问出了信息（候选人答得具体、暴露了能力或风险），哪些问题只是套话或重复。highSignalQuestions 必须能在某条笔记原文里找到出处或同类问法。avoidQuestions 必须基于笔记里出现的"问了但答不出有效信息"的题。
 3. 不要强行按行为题/技术题分类，更重要的是高区分度、可追问、能和简历经历对上。
 4. 如果历史样本不足，仍需输出一个保守版本。`;
 
