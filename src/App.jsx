@@ -3371,7 +3371,7 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}>
                         <div style={{fontSize:18,fontWeight:900,color:"#7c3aed",lineHeight:1}}>{fmtDate(candidate.scheduledAt)}</div>
-                        <div style={{fontSize:11,color:"#7c3aed",fontWeight:800,marginTop:4}}>{candidate.interviewRound||"面试"} · 进入记录</div>
+                        <div style={{fontSize:11,color:"#7c3aed",fontWeight:800,marginTop:4}}>{candidate.interviewRound||"面试"}{(candidate.interviewLocation ?? "")?` · 📍 ${candidate.interviewLocation ?? ""}`:""} · 进入记录</div>
                       </div>
                     </button>
                   );
@@ -4063,7 +4063,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
                 <span style={{fontSize:12,color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{scr?.summary?scr.summary.slice(0,35)+"…":<span style={{color:T.border2}}>未筛选</span>}</span>
                 <span style={{textAlign:"center",fontWeight:700,color:scr?scColor(scr.overallScore):T.text4}}>{scr?scr.overallScore?.toFixed(1):"—"}</span>
                 <span style={{textAlign:"center"}}><SBadge status={c.status}/></span>
-                <span style={{textAlign:"center",fontSize:11,color:c.scheduledAt?"#7c3aed":T.text4}}>{c.scheduledAt?`${fmtDate(c.scheduledAt)}${c.interviewLocation?` · ${c.interviewLocation}`:""}`:"—"}</span>
+                <span style={{textAlign:"center",fontSize:11,color:c.scheduledAt?"#7c3aed":T.text4}}>{c.scheduledAt?`${fmtDate(c.scheduledAt)}${(c.interviewLocation ?? "")?` · ${c.interviewLocation ?? ""}`:""}`:"—"}</span>
               </div>);
             })}
           </>}
@@ -4276,9 +4276,9 @@ function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setT
                     {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",fontWeight:700}}>面试评估后台运行中</div>}
                     {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>面试题后台生成中</div>}
                     {c.status==="interview"&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>
-                      📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}${c.interviewLocation?` · 📍 ${c.interviewLocation}`:""}`:"已进入面试 · 待安排时间"}
+                      📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}${(c.interviewLocation ?? "")?` · 📍 ${c.interviewLocation ?? ""}`:""}`:"已进入面试 · 待安排时间"}
                     </div>}
-                    {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed"}}>📅 {fmtDate(c.scheduledAt)}{c.interviewLocation?` · 📍 ${c.interviewLocation}`:""}</div>}
+                    {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed"}}>📅 {fmtDate(c.scheduledAt)}{(c.interviewLocation ?? "")?` · 📍 ${c.interviewLocation ?? ""}`:""}</div>}
                     {c.directorVerdict?.verdict&&<div style={{fontSize:10,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
                   </div>}
                 </div>
