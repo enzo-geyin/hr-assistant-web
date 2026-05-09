@@ -33,12 +33,14 @@ PORT=8787 ANTHROPIC_API_KEY=your_key npm run proxy
 - Pages Functions 文件位置：`functions/api/ai.js`
 - 云端状态 API：`functions/api/state.js`
 - 学习系统 API：`functions/api/knowledge.js`
-- 可选前端环境变量：`VITE_HR_PROXY_URL`、`VITE_HR_PROXY_TOKEN`
+- 可选前端环境变量：`VITE_HR_PROXY_URL`、`VITE_HR_PROXY_TOKEN`、`VITE_HR_STATE_URL`（类型必须选 **Plaintext**，构建时编入前端 bundle）
 - 必填服务端环境变量：至少一个模型平台的 API Key
-- 可选服务端环境变量：`HR_PROXY_TOKEN`
+- 可选服务端环境变量：`HR_PROXY_TOKEN`（类型选 **Secret**）
 - D1 绑定名：`DB`
 
 Cloudflare Pages 部署时，前端和代理函数会走同一个域名，默认直接请求 `/api/ai`，不需要额外填代理地址。
+
+> **重要：开启了 `HR_PROXY_TOKEN` 就必须同时配 `VITE_HR_PROXY_TOKEN`，两者值完全一致。** 前者给服务端 Functions 校验请求，后者在构建时编进前端 JS。漏配 `VITE_HR_PROXY_TOKEN` 时，新设备或隐私窗打开网站会显示"代理访问令牌无效"，看起来像数据丢了，其实只是前端没拿到 token。`HR_PROXY_TOKEN` 出现在前端 bundle 里相当于半公开，建议给整个 Pages 项目额外加 Cloudflare Access 做身份验证。
 
 ### Cloudflare D1 配置
 
