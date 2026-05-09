@@ -1890,6 +1890,20 @@ export const getFinalAiRecommendation = cand => {
   return cand?.screening?.recommendation || "";
 };
 
+export const getAiVerdictTone = recommendation => {
+  if (!recommendation) return "unknown";
+  if (/(通过|录用)/.test(recommendation)) return "positive";
+  if (/淘汰/.test(recommendation)) return "negative";
+  return "neutral";
+};
+
+export const getHumanVerdictTone = verdict => {
+  if (!verdict) return "unknown";
+  if (["录用","通过"].includes(verdict)) return "positive";
+  if (verdict === "淘汰") return "negative";
+  return "neutral";
+};
+
 const buildLearningSample = (cand, job, verdict, reason) => {
   const aiRecommendation = getFinalAiRecommendation(cand);
   const directorVerdict = verdict || "";

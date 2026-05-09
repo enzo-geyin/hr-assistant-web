@@ -7,7 +7,8 @@ import {
   buildResumeSignature, runResumeScreening, resolveScreeningStatusPatch, recSt, scColor, highlightTextByKeywords,
   formatRubricContext, formatQuestionBankContext, mergeQuestionFeedbackHistory, getQuestionBankSourceMeta,
   getQuestionFeedbackOption, QUESTION_FEEDBACK_OPTIONS, getInterviewRoundsForJob, isSingleRoundLevel,
-  transcribeAudioFile, learnFromDirectorFeedback, KNOWLEDGE_MIN_SAMPLES, getFinalAiRecommendation, cleanListLine
+  transcribeAudioFile, learnFromDirectorFeedback, KNOWLEDGE_MIN_SAMPLES, getFinalAiRecommendation, cleanListLine,
+  getAiVerdictTone, getHumanVerdictTone
 } from "../App.jsx";
 
 function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
@@ -1318,20 +1319,6 @@ function QuestionBankPanel({T,learning}) {
     </div>
   );
 }
-
-const getAiVerdictTone = recommendation => {
-  if (!recommendation) return "unknown";
-  if (/(通过|录用)/.test(recommendation)) return "positive";
-  if (/淘汰/.test(recommendation)) return "negative";
-  return "neutral";
-};
-
-const getHumanVerdictTone = verdict => {
-  if (!verdict) return "unknown";
-  if (["录用","通过"].includes(verdict)) return "positive";
-  if (verdict === "淘汰") return "negative";
-  return "neutral";
-};
 
 const buildVerdictGapAnalysis = cand => {
   const aiRec = getFinalAiRecommendation(cand);
