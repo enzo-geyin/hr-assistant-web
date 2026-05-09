@@ -11,7 +11,7 @@ import {
   getAiVerdictTone, getHumanVerdictTone
 } from "../App.jsx";
 
-function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
+function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const [showResumePreview,setShowResumePreview]=useState(true);
@@ -199,7 +199,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
             <div style={{padding:"14px 16px",borderRadius:18,background:"#f8fafc",border:`1px solid ${T.border}`,boxShadow:"0 10px 24px rgba(15,23,42,0.05)"}}>
               <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em"}}>当前进度</div>
               <div style={{fontSize:17,fontWeight:900,color:currentStatusMeta?.c||T.text,marginTop:10}}>{currentStatusMeta?.label||"待处理"}</div>
-              {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}</div>}
+              {cand.scheduledAt&&<div style={{fontSize:11,color:"#7c3aed",marginTop:6,fontWeight:700}}>{fmtDate(cand.scheduledAt)}{(cand.interviewLocation ?? "")?` · 📍 ${cand.interviewLocation ?? ""}`:""}</div>}
             </div>
           </div>
 
@@ -337,7 +337,7 @@ function CandDetail({T,cand,job,jobs,tab,setTab,cfg,updCand,recordTokens,dirCtx,
       <div style={{padding:"16px 12px 10px"}}>
         {tab==="screening"&&<ScreenTab  key={`screening-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState}/>}
         {tab==="questions"&&<QuestionTab key={`questions-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} learning={learning} learningState={learningState} questionTask={questionTask} startQuestionGeneration={startQuestionGeneration}/>}
-        {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
+        {tab==="interview"&&<InterviewTab key={`interview-${cand.id}`} T={T} cand={cand} job={job} allCandidates={allCandidates} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} interviewTask={interviewTask} startInterviewAssessment={startInterviewAssessment}/>}
         {tab==="director" &&<DirectorTab  key={`director-${cand.id}`} T={T} cand={cand} job={job} cfg={cfg} updCand={updCand} recordTokens={recordTokens} learning={learning} learningState={learningState} refreshLearning={refreshLearning}/>}
         {tab==="result"   &&<ResultTab    key={`result-${cand.id}`} T={T} cand={cand}/>}
       </div>
@@ -857,12 +857,16 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
 }
 
 // ─── INTERVIEW TAB ───────────────────────────────────────────
-function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,startInterviewAssessment}) {
+function InterviewTab({T,cand,job,allCandidates=[],cfg,updCand,recordTokens,dirCtx,interviewTask,startInterviewAssessment}) {
   const roundOptions = useMemo(()=>getInterviewRoundsForJob(job),[job?.id,job?.level,job?.title]);
   const [round,setRound]=useState(roundOptions[0] || "一面");
   const [notes,setNotes]=useState("");
   const [schedDate,setSchedDate]=useState("");
   const [schedTime,setSchedTime]=useState("10:00");
+  const [interviewLocation,setInterviewLocation]=useState(cand.interviewLocation ?? "");
+  const [interviewLink,setInterviewLink]=useState(cand.interviewLink ?? "");
+  const [interviewNotes,setInterviewNotes]=useState(cand.interviewNotes ?? "");
+  const [conflictWarning,setConflictWarning]=useState("");
   const [noteFile,setNoteFile]=useState(null);
   const [noteFileName,setNoteFileName]=useState("");
   const [noteDrag,setNoteDrag]=useState(false);
@@ -878,6 +882,27 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
   const prevInterviewCountRef=useRef((cand.interviews||[]).length);
   const currentFileKind=noteFile?getFileKind(noteFile):"unknown";
   const latestInterviewRecord=(cand.interviews||[]).slice(-1)[0] || null;
+  const pad=n=>String(n).padStart(2,"0");
+  const fmtYmd=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const tomorrow=new Date(Date.now()+24*3600*1000);
+  const dayAfter=new Date(Date.now()+48*3600*1000);
+  const quickSlots=[
+    {label:"明天上午 10:00",date:fmtYmd(tomorrow),time:"10:00"},
+    {label:"明天下午 14:00",date:fmtYmd(tomorrow),time:"14:00"},
+    {label:"后天上午 10:00",date:fmtYmd(dayAfter),time:"10:00"},
+  ];
+  const checkConflict=(date,time)=>{
+    if(!date || !time) return "";
+    const target=new Date(`${date}T${time}:00`).getTime();
+    const conflicts=(allCandidates||[]).filter(c=>{
+      if(c.id===cand.id || !c.scheduledAt) return false;
+      const t=new Date(c.scheduledAt).getTime();
+      return Math.abs(t-target)<=30*60*1000;
+    });
+    return conflicts.length
+      ? `提示：${date} ${time} 前后 30 分钟已安排 ${conflicts.length} 个面试`
+      : "";
+  };
   const workPanel={
     background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
     border:`1px solid ${T.border}`,
@@ -930,12 +955,20 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
       setSchedDate(datePart || "");
       setSchedTime((timePart || "").slice(0,5) || "10:00");
       setRound(cand.interviewRound || roundOptions[0] || "一面");
+      setInterviewLocation(cand.interviewLocation ?? "");
+      setInterviewLink(cand.interviewLink ?? "");
+      setInterviewNotes(cand.interviewNotes ?? "");
+      setConflictWarning("");
       return;
     }
     setSchedDate("");
     setSchedTime("10:00");
     setRound(cand.interviewRound || roundOptions[0] || "一面");
-  },[cand.id,cand.scheduledAt,cand.interviewRound,job?.id,job?.level,job?.title]);
+    setInterviewLocation(cand.interviewLocation ?? "");
+    setInterviewLink(cand.interviewLink ?? "");
+    setInterviewNotes(cand.interviewNotes ?? "");
+    setConflictWarning("");
+  },[cand.id,cand.scheduledAt,cand.interviewRound,cand.interviewLocation,cand.interviewLink,cand.interviewNotes,job?.id,job?.level,job?.title]);
 
   const openPicker=ref=>{
     const input=ref?.current;
@@ -991,7 +1024,15 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
 
   const saveSchedule=()=>{
     if(!schedDate)return;
-    updCand(cand.id,{scheduledAt:`${schedDate}T${schedTime}:00`,interviewRound:round,status:"interview",statusSource:"system"});
+    updCand(cand.id,{
+      scheduledAt:`${schedDate}T${schedTime}:00`,
+      interviewRound:round,
+      interviewLocation:interviewLocation ?? null,
+      interviewLink:interviewLink ?? null,
+      interviewNotes:interviewNotes ?? null,
+      status:"interview",
+      statusSource:"system"
+    });
   };
   const clearSchedule=()=>{
     const ok=window.confirm(`确认删除 ${cand.name||"该候选人"} 的面试预约时间吗？`);
@@ -1000,6 +1041,7 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
     setSchedDate("");
     setSchedTime("10:00");
     setRound(roundOptions[0] || "一面");
+    setConflictWarning("");
   };
 
   const assess=async()=>{
@@ -1070,6 +1112,25 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
         <div style={{...workspaceRail,minWidth:0}}>
           <div>
             <div style={{fontSize:10,fontWeight:800,color:T.text4,letterSpacing:"0.08em",marginBottom:10}}>安排面试</div>
+            <div style={{marginBottom:12}}>
+              <SecLabel T={T}>快捷时段</SecLabel>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:6}}>
+                {quickSlots.map((slot,idx)=>(
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={()=>{
+                      setSchedDate(slot.date);
+                      setSchedTime(slot.time);
+                      setConflictWarning(checkConflict(slot.date,slot.time));
+                    }}
+                    style={{padding:"6px 12px",border:"1px solid #ddd",borderRadius:6,background:"#f8f9fa",cursor:"pointer",fontSize:13}}
+                  >
+                    {slot.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={lbSt(T)}>面试轮次</label>
                 <select value={round} onChange={e=>setRound(e.target.value)} style={{...inSt(T),background:"#fff"}}>
@@ -1079,18 +1140,21 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
               <div>
                 <label style={lbSt(T)}>面试日期</label>
                 <div style={{display:"flex",gap:8}}>
-                  <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={{...inSt(T),flex:1,background:"#fff"}}/>
+                  <input ref={dateInputRef} type="date" value={schedDate} onChange={e=>{const nextDate=e.target.value;setSchedDate(nextDate);setConflictWarning(checkConflict(nextDate,schedTime));}} style={{...inSt(T),flex:1,background:"#fff"}}/>
                   <button type="button" onClick={()=>openPicker(dateInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:16}}>📅</button>
                 </div>
               </div>
               <div>
                 <label style={lbSt(T)}>面试时间</label>
                 <div style={{display:"flex",gap:8}}>
-                  <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>setSchedTime(e.target.value)} style={{...inSt(T),flex:1,background:"#fff"}}/>
+                  <input ref={timeInputRef} type="time" value={schedTime} onChange={e=>{const nextTime=e.target.value;setSchedTime(nextTime);setConflictWarning(checkConflict(schedDate,nextTime));}} style={{...inSt(T),flex:1,background:"#fff"}}/>
                   <button type="button" onClick={()=>openPicker(timeInputRef)} style={{padding:"0 12px",border:`1px solid ${T.border2}`,borderRadius:10,background:"#fff",color:T.text2,cursor:"pointer",fontSize:15}}>🕒</button>
                 </div>
               </div>
               <div style={{display:"grid",gap:8,alignContent:"end"}}>
+                {conflictWarning&&<div style={{padding:"8px 12px",background:"#fff3cd",border:"1px solid #ffc107",borderRadius:6,fontSize:13,color:"#856404",marginBottom:8}}>
+                  {conflictWarning}
+                </div>}
                 <button onClick={saveSchedule} disabled={!schedDate}
                   style={{padding:"10px 16px",background:schedDate?T.accent:"#e5e7eb",color:schedDate?T.accentFg:T.text4,border:"none",borderRadius:10,cursor:schedDate?"pointer":"not-allowed",fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>
                   {cand.scheduledAt?"更新预约":"确认预约"}
@@ -1103,10 +1167,24 @@ function InterviewTab({T,cand,job,cfg,updCand,recordTokens,dirCtx,interviewTask,
                 </button>}
               </div>
             </div>
+            <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid #eee"}}>
+              <div style={{marginBottom:10}}>
+                <SecLabel T={T}>面试地点</SecLabel>
+                <Inp T={T} value={interviewLocation} onChange={e=>setInterviewLocation(e.target.value)} placeholder="如：会议室A / 线上 / 公司前台" />
+              </div>
+              <div style={{marginBottom:10}}>
+                <SecLabel T={T}>会议链接</SecLabel>
+                <Inp T={T} value={interviewLink} onChange={e=>setInterviewLink(e.target.value)} placeholder="飞书/腾讯会议链接（可选）" />
+              </div>
+              <div>
+                <SecLabel T={T}>备注</SecLabel>
+                <textarea value={interviewNotes} onChange={e=>setInterviewNotes(e.target.value)} placeholder="给候选人的注意事项、自我介绍重点等" rows={3} style={{...inSt(T),resize:"vertical",fontFamily:"inherit"}} />
+              </div>
+            </div>
             {isSingleRoundLevel(job?.level)&&<div style={{marginTop:12,fontSize:12,color:T.text3,lineHeight:1.75,padding:"10px 12px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:12}}>
               当前岗位职级为 <strong style={{color:T.text}}>{job?.level||"专员/组长/主管"}</strong>，默认只安排一面；一面通过后直接进入最终判断，不再默认进入二面。
             </div>}
-            {cand.scheduledAt&&<div style={{marginTop:12,fontSize:13,color:"#7c3aed",fontWeight:700}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}</div>}
+            {cand.scheduledAt&&<div style={{marginTop:12,fontSize:13,color:"#7c3aed",fontWeight:700}}>✓ 已预约：{cand.interviewRound} · {fmtDate(cand.scheduledAt)}{(cand.interviewLocation ?? "")?` · 📍 ${cand.interviewLocation ?? ""}`:""}</div>}
           </div>
 
           <div style={railDivider}>

@@ -188,6 +188,9 @@ function mergeCandidateRecord(left, right) {
     interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
+    interviewLocation: newer?.interviewLocation ?? older?.interviewLocation ?? null,
+    interviewLink: newer?.interviewLink ?? older?.interviewLink ?? null,
+    interviewNotes: newer?.interviewNotes ?? older?.interviewNotes ?? null,
     directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
     updatedAt: (mergedTime ? new Date(mergedTime) : new Date()).toISOString(),
   };

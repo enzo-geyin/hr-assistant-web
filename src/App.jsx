@@ -151,6 +151,9 @@ const mergeCandidateRecord = (left, right) => {
     interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
+    interviewLocation: newer?.interviewLocation ?? older?.interviewLocation ?? null,
+    interviewLink: newer?.interviewLink ?? older?.interviewLink ?? null,
+    interviewNotes: newer?.interviewNotes ?? older?.interviewNotes ?? null,
     directorVerdict: pickRicherValue(newer?.directorVerdict, older?.directorVerdict) || null,
     updatedAt: (mergedTime ? new Date(mergedTime) : new Date()).toISOString(),
   };
@@ -2116,7 +2119,7 @@ const dataUrlToImage = dataUrl => new Promise((resolve, reject) => {
   image.src = dataUrl;
 });
 
-const compressImageDataUrl = async (dataUrl, { maxWidth = 900, maxHeight = 1280, quality = 0.72 } = {}) => {
+const compressImageDataUrl = async (dataUrl, { maxWidth = 1600, maxHeight = 2200, quality = 0.95 } = {}) => {
   const image = await dataUrlToImage(dataUrl);
   const width = image.naturalWidth || image.width || 0;
   const height = image.naturalHeight || image.height || 0;
@@ -2129,17 +2132,17 @@ const compressImageDataUrl = async (dataUrl, { maxWidth = 900, maxHeight = 1280,
   const context = canvas.getContext("2d");
   if (!context) return dataUrl;
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/jpeg", quality);
+  return canvas.toDataURL("image/png");
 };
 
 export const createResumeVisualPreview = async (file, options = {}) => {
   const {
     maxPages = Number.POSITIVE_INFINITY,
-    scale = 1.35,
-    imageQuality = 0.92,
+    scale = 2.0,
+    imageQuality = 0.98,
     forceImageCompression = false,
-    imageMaxWidth = 1100,
-    imageMaxHeight = 1500,
+    imageMaxWidth = 1600,
+    imageMaxHeight = 2200,
   } = options || {};
   const kind = getFileKind(file);
   if (kind === "image") {
@@ -2165,7 +2168,7 @@ export const createResumeVisualPreview = async (file, options = {}) => {
     for (let pageNumber = 1; pageNumber <= renderCount; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const canvas = await renderPdfPageToCanvas(page, scale);
-      pages.push(canvas.toDataURL("image/jpeg", imageQuality));
+      pages.push(canvas.toDataURL("image/png"));
     }
     return {
       kind: "pdf",
@@ -4060,7 +4063,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
                 <span style={{fontSize:12,color:T.text3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{scr?.summary?scr.summary.slice(0,35)+"…":<span style={{color:T.border2}}>未筛选</span>}</span>
                 <span style={{textAlign:"center",fontWeight:700,color:scr?scColor(scr.overallScore):T.text4}}>{scr?scr.overallScore?.toFixed(1):"—"}</span>
                 <span style={{textAlign:"center"}}><SBadge status={c.status}/></span>
-                <span style={{textAlign:"center",fontSize:11,color:c.scheduledAt?"#7c3aed":T.text4}}>{c.scheduledAt?fmtDate(c.scheduledAt):"—"}</span>
+                <span style={{textAlign:"center",fontSize:11,color:c.scheduledAt?"#7c3aed":T.text4}}>{c.scheduledAt?`${fmtDate(c.scheduledAt)}${c.interviewLocation?` · ${c.interviewLocation}`:""}`:"—"}</span>
               </div>);
             })}
           </>}
@@ -4273,9 +4276,9 @@ function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setT
                     {interviewTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#2563eb",fontWeight:700}}>面试评估后台运行中</div>}
                     {questionTasks?.[c.id]?.loading&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>面试题后台生成中</div>}
                     {c.status==="interview"&&<div style={{fontSize:10,color:"#7c3aed",fontWeight:700}}>
-                      📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}`:"已进入面试 · 待安排时间"}
+                      📅 {c.scheduledAt?`面试时间：${fmtDate(c.scheduledAt)}${c.interviewLocation?` · 📍 ${c.interviewLocation}`:""}`:"已进入面试 · 待安排时间"}
                     </div>}
-                    {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed"}}>📅 {fmtDate(c.scheduledAt)}</div>}
+                    {c.status!=="interview"&&c.scheduledAt&&isSoon(c.scheduledAt)&&<div style={{fontSize:10,color:"#7c3aed"}}>📅 {fmtDate(c.scheduledAt)}{c.interviewLocation?` · 📍 ${c.interviewLocation}`:""}</div>}
                     {c.directorVerdict?.verdict&&<div style={{fontSize:10,fontWeight:700,color:c.directorVerdict.verdict==="录用"?"#059669":c.directorVerdict.verdict==="淘汰"?"#dc2626":"#ca8a04"}}>总监：{c.directorVerdict.verdict}</div>}
                   </div>}
                 </div>
@@ -4284,7 +4287,7 @@ function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setT
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)} onReplaceResume={replaceCandidateResume}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} allCandidates={cands} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)} onReplaceResume={replaceCandidateResume}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);

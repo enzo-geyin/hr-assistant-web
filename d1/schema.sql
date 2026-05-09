@@ -1,3 +1,11 @@
+-- 线上 D1 如存在独立 candidates 表，需要手动执行以下 3 条增量 ALTER：
+-- ALTER TABLE candidates ADD COLUMN interview_location TEXT;
+-- ALTER TABLE candidates ADD COLUMN interview_link TEXT;
+-- ALTER TABLE candidates ADD COLUMN interview_notes TEXT;
+--
+-- 当前项目的候选人主体数据保存在 hr_state.payload JSON 快照中；
+-- 上述字段会随 candidates JSON 一起同步，不会影响历史数据。
+
 CREATE TABLE IF NOT EXISTS hr_state (
   state_key TEXT PRIMARY KEY,
   payload TEXT NOT NULL,
