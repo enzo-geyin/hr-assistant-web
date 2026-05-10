@@ -1935,14 +1935,28 @@ const buildLearningSample = (cand, job, verdict, reason) => {
     interviewNotesRaw: ((cand.interviews || [])
       .map((ir, idx) => {
         const round = ir?.round || `第${idx+1}轮`;
-        const notes = String(ir?.notes || "").trim();
+        const qa = Array.isArray(ir?.extractedQA) ? ir.extractedQA : [];
         const loc = ir?.assessment?.summary ? `\n  评估摘要：${ir.assessment.summary}` : "";
-        if (!notes && !loc) return "";
-        return `[${round}]\n  笔记：${notes || "(无)"}${loc}`;
+
+        let body = "";
+        if (qa.length > 0) {
+          body = qa.map((item, i) => {
+            const q = String(item.question || "").trim();
+            const a = String(item.answer || "").trim();
+            const sig = item.signal ? `[${item.signal}]` : "";
+            return `  ${i+1}. ${sig} 问：${q}${a ? `\n     答：${a}` : ""}`;
+          }).join("\n");
+        } else {
+          const rawNotes = String(ir?.notes || "").trim();
+          body = rawNotes ? `  原始笔记：\n${rawNotes.slice(0, 4000)}` : "";
+        }
+
+        if (!body && !loc) return "";
+        return `[${round}]\n${body}${loc}`;
       })
       .filter(Boolean)
       .join("\n\n")
-      .slice(0, 4000)) || "",
+      .slice(0, 12000)) || "",
     mismatchType,
     deltaNotes,
     samplePayload: {
@@ -1976,7 +1990,7 @@ ${samples.map((sample, index) => `样本${index+1}：
 {"rubricSummary":"一句话总结这一岗位最新判断基准","rubric":{"hardRequirements":["硬门槛"],"coreDimensions":[{"dimension":"维度","weight":"高|中|低","note":"评分说明"}],"passSignals":["优先录用信号"],"redFlags":["高风险信号"],"calibrationTips":["避免误判的评分提醒"]},"questionBankSummary":"一句话总结最新题库策略","questionBank":{"highSignalQuestions":[{"question":"高价值问题","purpose":"为什么有效","targetSignal":"主要识别什么","step":"建议放在第几步"}],"questionPatterns":[{"pattern":"问题模板/提问方向","useWhen":"适用场景","why":"为什么有效"}],"followUpPatterns":[{"pattern":"追问方式","useWhen":"何时继续追问","why":"能挖出什么"}],"avoidQuestions":[{"question":"应该少问或淘汰的问题","reason":"为什么低效/重复/容易被套话"}]}}
 要求：
 1. 规则一定要能指导后续筛选和面试，不要空泛。
-2. 题库必须优先消费"面试笔记原文"字段——从笔记中识别哪些问题真正问出了信息（候选人答得具体、暴露了能力或风险），哪些问题只是套话或重复。highSignalQuestions 必须能在某条笔记原文里找到出处或同类问法。avoidQuestions 必须基于笔记里出现的"问了但答不出有效信息"的题。
+2. 题库必须优先消费"面试笔记原文"字段——从笔记中识别哪些问题真正问出了信息（候选人答得具体、暴露了能力或风险），哪些问题只是套话或重复。highSignalQuestions 必须能在某条笔记原文里找到出处或同类问法。avoidQuestions 必须基于笔记里出现的"问了但答不出有效信息"的题。interviewNotesRaw 字段已结构化抽取了真实面试问答（含 [经验][能力][动机][风险][其他] 五种信号标签）。highSignalQuestions 必须从这份真实问答中归纳，重点选择那些 signal 是「经验」「能力」「风险」、且候选人回答暴露关键差异的问题。avoidQuestions 应包含那些 answer 内容雷同、套话化、无信号增量的问题。不要虚构问题，所有题必须能在 interviewNotesRaw 中找到出处。
 3. 不要强行按行为题/技术题分类，更重要的是高区分度、可追问、能和简历经历对上。
 4. 如果历史样本不足，仍需输出一个保守版本。`;
 
@@ -2333,6 +2347,69 @@ async function callAI(cfg, system, user, onTokens, dirCtx="", options={}) {
     );
   }
   return parsed;
+}
+
+async function extractInterviewQAByLLM(cfg, notes, onTokens) {
+  const text = String(notes || "").trim();
+  if (!text || text.length < 50) return [];
+
+  const truncated = text.slice(0, 12000);
+
+  const system = `你是面试笔记结构化分析师。从面试笔记中抽取所有"面试官问候选人"的真实问答对。严格按 JSON 输出，不含任何 markdown 标记。`;
+
+  const user = `下面是一份面试笔记（markdown 格式），请抽取所有"面试官提问 + 候选人回答"对。
+
+抽取规则：
+1. 显式标记的 Q/A、面试官提问、问答章节里的提问，都要抽取
+2. 列表项作为问题、引用块（> A:）作为回答的，也要抽取
+3. 隐含的"应当追问"点（如"需要确认xxx""需要验证xxx"），抽取为 question 但 answer 留空
+4. 候选人反问（"面试者提问"章节）不要抽取，只要面试官问候选人的
+5. 描述性段落（如"工作经历描述"）不是问答，不要抽取
+6. 同一问题不要重复抽取，按笔记出现顺序输出
+
+每条问答输出 signal 字段，从下列枚举选一个最贴切的：
+- 经验：考察过往项目、岗位经历
+- 能力：考察技能、方法论、解决问题方式
+- 动机：考察求职原因、职业规划、稳定性
+- 风险：考察可能的风险点（薪资、休息、抗压等）
+- 其他：以上都不是
+
+输出 JSON：
+{
+  "extractedQA": [
+    {"question": "问题原文", "answer": "回答原文（无答案则空字符串）", "signal": "经验|能力|动机|风险|其他"}
+  ]
+}
+
+笔记内容：
+${truncated}`;
+
+  try {
+    const res = await callAI(
+      {...cfg, provider:"deepseek", model:"deepseek-v4-flash"},
+      system,
+      user,
+      onTokens,
+      "",
+      { maxTokens: 3000 }
+    );
+    if (res?.error) return [];
+    let parsed = res;
+    if (typeof res === "string") {
+      try { parsed = JSON.parse(res); } catch { return []; }
+    }
+    const arr = Array.isArray(parsed?.extractedQA) ? parsed.extractedQA : [];
+    return arr
+      .filter(x => x && typeof x.question === "string" && x.question.trim().length >= 3)
+      .map(x => ({
+        question: String(x.question).trim().slice(0, 300),
+        answer: String(x.answer || "").trim().slice(0, 800),
+        signal: ["经验","能力","动机","风险","其他"].includes(x.signal) ? x.signal : "其他",
+      }))
+      .slice(0, 50);
+  } catch (e) {
+    return [];
+  }
 }
 
 async function callAIWithJobFile(cfg, file, onTokens) {
@@ -3018,7 +3095,8 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       if(res.error) throw { message: res.error, raw: res.raw || "" };
       const assessment=normalizeInterviewAssessmentPayload(res);
       if(!assessment) throw { message: "模型已返回内容，但没有识别到有效的面试评估结果", raw: JSON.stringify(res, null, 2) };
-      const ni={round,notes,date:new Date().toLocaleDateString("zh-CN"),assessment};
+      const extractedQA = await extractInterviewQAByLLM(cfg, notes, recordTokens).catch(()=>[]);
+      const ni={round,notes,date:new Date().toLocaleDateString("zh-CN"),assessment,extractedQA};
       updCand(candidate.id,{
         interviews:[...(candidate.interviews||[]),ni],
         scheduledAt:null,
