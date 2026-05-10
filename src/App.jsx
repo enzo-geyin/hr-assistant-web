@@ -3351,14 +3351,15 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
   ];
   const total=cands.length;
   const rankedCands=[...cands].sort((a,b)=>(b.screening?.overallScore??-1)-(a.screening?.overallScore??-1));
-  const todayInterviewCandidates = cands
-    .filter(c=>{
-      if(!c?.scheduledAt) return false;
-      const date = new Date(c.scheduledAt);
-      if (Number.isNaN(date.getTime())) return false;
-      return date.toISOString().slice(0,10) === todayStr();
-    })
-    .sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+  const upcomingInterviewCandidates = cands.filter(c => {
+    if (!c?.scheduledAt) return false;
+    const d = new Date(c.scheduledAt);
+    if (Number.isNaN(d.getTime())) return false;
+    const now = Date.now();
+    const scheduled = d.getTime();
+    // 过去 12 小时到未来 7 天
+    return scheduled >= now - 12*3600*1000 && scheduled <= now + 7*24*3600*1000;
+  }).sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
   const dashboardShell={
     background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
     border:`1px solid ${T.border}`,
@@ -3438,15 +3439,15 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
         <div style={{padding:"16px 16px 14px",borderRadius:18,background:"linear-gradient(180deg, #faf5ff 0%, #ffffff 100%)",border:"1px solid #e9d5ff",boxShadow:"0 14px 32px rgba(124,58,237,0.08)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
             <div>
-              <div style={{fontSize:14,fontWeight:900,color:T.text}}>今日面试安排</div>
-              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>今天排期的候选人会固定放在这里，直接从首页进入面试记录。</div>
+              <div style={{fontSize:14,fontWeight:900,color:T.text}}>近期面试安排（7天内）</div>
+              <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>未来 7 天排期的候选人会固定放在这里，直接从首页进入面试记录。</div>
             </div>
-            <Chip c="#7c3aed" bg="#ede9fe" lg>{`${todayInterviewCandidates.length} 场`}</Chip>
+            <Chip c="#7c3aed" bg="#ede9fe" lg>{`${upcomingInterviewCandidates.length} 场`}</Chip>
           </div>
-          {todayInterviewCandidates.length===0
-            ? <div style={{padding:"18px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,fontSize:12,color:T.text4,lineHeight:1.8}}>今天还没有已排期的面试。安排好时间后，这里会自动出现快捷入口。</div>
+          {upcomingInterviewCandidates.length===0
+            ? <div style={{padding:"18px 14px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:14,fontSize:12,color:T.text4,lineHeight:1.8}}>近期 7 天暂无面试安排</div>
             : <div style={{display:"grid",gap:10}}>
-                {todayInterviewCandidates.map(candidate=>{
+                {upcomingInterviewCandidates.map(candidate=>{
                   const candidateJob = getEffectiveCandidateJob(jobs, candidate);
                   return(
                     <button
@@ -3460,7 +3461,16 @@ function DashboardView({T,jobs,cands,dirStats,onJobClick,onCandClick,cfg,recordT
                         <div style={{fontSize:11,color:T.text4,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{candidateJob?.title||candidate.screening?.roleDirection||"未绑定岗位"}</div>
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}>
-                        <div style={{fontSize:18,fontWeight:900,color:"#7c3aed",lineHeight:1}}>{fmtDate(candidate.scheduledAt)}</div>
+                        <div style={{fontSize:18,fontWeight:900,color:"#7c3aed",lineHeight:1}}>{(()=>{
+                          const d = new Date(candidate.scheduledAt);
+                          const today = new Date().toDateString();
+                          const tomorrow = new Date(Date.now() + 24*3600*1000).toDateString();
+                          let prefix = "";
+                          if (d.toDateString() === today) prefix = "今日 ";
+                          else if (d.toDateString() === tomorrow) prefix = "明日 ";
+                          else prefix = `${d.getMonth()+1}/${d.getDate()} `;
+                          return prefix + fmtDate(candidate.scheduledAt);
+                        })()}</div>
                         <div style={{fontSize:11,color:"#7c3aed",fontWeight:800,marginTop:4}}>{candidate.interviewRound||"面试"}{(candidate.interviewLocation ?? "")?` · 📍 ${candidate.interviewLocation ?? ""}`:""} · 进入记录</div>
                       </div>
                     </button>
@@ -4166,35 +4176,53 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
 function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
   const [searchText,setSearchText]=useState("");
-  const sortedCands=[...cands].sort((a,b)=>{
-    const batchA=a.importBatchId||"";
-    const batchB=b.importBatchId||"";
-    const timeA=new Date(a.importedAt || a.createdAt || a.updatedAt || 0).getTime() || 0;
-    const timeB=new Date(b.importedAt || b.createdAt || b.updatedAt || 0).getTime() || 0;
-    if(batchA && batchA===batchB){
-      const seqA=Number.isFinite(a.importSeq)?a.importSeq:Number.MAX_SAFE_INTEGER;
-      const seqB=Number.isFinite(b.importSeq)?b.importSeq:Number.MAX_SAFE_INTEGER;
-      if(seqA!==seqB) return seqA-seqB;
+  const [sortMode,setSortMode]=useState("import"); // "import" | "interview"
+  const sortedCands=useMemo(()=>{
+    const compareByImport=(a,b)=>{
+      const batchA=a.importBatchId||"";
+      const batchB=b.importBatchId||"";
+      const timeA=new Date(a.importedAt || a.createdAt || a.updatedAt || 0).getTime() || 0;
+      const timeB=new Date(b.importedAt || b.createdAt || b.updatedAt || 0).getTime() || 0;
+      if(batchA && batchA===batchB){
+        const seqA=Number.isFinite(a.importSeq)?a.importSeq:Number.MAX_SAFE_INTEGER;
+        const seqB=Number.isFinite(b.importSeq)?b.importSeq:Number.MAX_SAFE_INTEGER;
+        if(seqA!==seqB) return seqA-seqB;
+      }
+      if(timeA!==timeB) return timeB-timeA;
+      return Number(b.id||0)-Number(a.id||0);
+    };
+    const candidateMatchesSearch = candidate => {
+      const query = normalizeMatchText(searchText);
+      if (!query) return true;
+      const effectiveJob = getEffectiveCandidateJob(jobs, candidate);
+      const corpus = [
+        candidate?.name,
+        candidate?.resumeFileName,
+        candidate?.screening?.roleDirection,
+        candidate?.screening?.matchedJobTitle,
+        effectiveJob?.title,
+        candidate?.status,
+        candidate?.directorVerdict?.verdict,
+      ].join("\n");
+      return normalizeMatchText(corpus).includes(query);
+    };
+    const filtered=[...cands].filter(candidateMatchesSearch);
+    if(sortMode==="interview"){
+      const scheduled = filtered.filter(c=>{
+        if(!c?.scheduledAt) return false;
+        const scheduledTime = new Date(c.scheduledAt).getTime();
+        return !Number.isNaN(scheduledTime);
+      }).sort((a,b)=>new Date(a.scheduledAt)-new Date(b.scheduledAt));
+      const unscheduled = filtered.filter(c=>{
+        if(!c?.scheduledAt) return true;
+        const scheduledTime = new Date(c.scheduledAt).getTime();
+        return Number.isNaN(scheduledTime);
+      }).sort(compareByImport);
+      return [...scheduled,...unscheduled];
     }
-    if(timeA!==timeB) return timeB-timeA;
-    return Number(b.id||0)-Number(a.id||0);
-  });
-  const candidateMatchesSearch = candidate => {
-    const query = normalizeMatchText(searchText);
-    if (!query) return true;
-    const effectiveJob = getEffectiveCandidateJob(jobs, candidate);
-    const corpus = [
-      candidate?.name,
-      candidate?.resumeFileName,
-      candidate?.screening?.roleDirection,
-      candidate?.screening?.matchedJobTitle,
-      effectiveJob?.title,
-      candidate?.status,
-      candidate?.directorVerdict?.verdict,
-    ].join("\n");
-    return normalizeMatchText(corpus).includes(query);
-  };
-  const filteredCands=sortedCands.filter(candidateMatchesSearch);
+    return filtered.sort(compareByImport);
+  },[cands,jobs,searchText,sortMode]);
+  const filteredCands=sortedCands;
   const cand=cands.find(c=>c.id===selCand);
   const job=getEffectiveCandidateJob(jobs,cand);
   const [showImport,setShowImport]=useState(false);
@@ -4313,17 +4341,27 @@ function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setT
               <div style={{fontSize:18,fontWeight:900,color:"#ca8a04",marginTop:6}}>{cands.filter(item=>item.status==="watching").length}</div>
             </div>
           </div>
-          <div style={{position:"relative",marginTop:14}}>
-            <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:T.text4,pointerEvents:"none"}}>⌕</span>
-            <input
-              value={searchText}
-              onChange={e=>setSearchText(e.target.value)}
-              placeholder="搜索姓名、岗位、文件名..."
-              style={{...inSt(T),marginBottom:0,fontSize:12,padding:"10px 12px 10px 34px",background:"#ffffff"}}
-            />
+          <div style={{display:"flex",gap:10,alignItems:"center",marginTop:14}}>
+            <div style={{position:"relative",flex:1,minWidth:0}}>
+              <span style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:T.text4,pointerEvents:"none"}}>⌕</span>
+              <input
+                value={searchText}
+                onChange={e=>setSearchText(e.target.value)}
+                placeholder="搜索姓名、岗位、文件名..."
+                style={{...inSt(T),marginBottom:0,fontSize:12,padding:"10px 12px 10px 34px",background:"#ffffff"}}
+              />
+            </div>
+            <select
+              value={sortMode}
+              onChange={e=>setSortMode(e.target.value)}
+              style={{padding:"10px 10px",border:`1px solid ${T.border2}`,borderRadius:12,background:"#ffffff",color:T.text,fontSize:12,fontWeight:700,outline:"none",cursor:"pointer",maxWidth:116}}
+            >
+              <option value="import">按导入时间</option>
+              <option value="interview">按面试时间</option>
+            </select>
           </div>
           <div style={{fontSize:10,color:T.text4,marginTop:8,lineHeight:1.6}}>
-            {!!searchText.trim()?`当前命中 ${filteredCands.length} 位候选人`:"候选人会按上传顺序与最近活动自动排序"}
+            {!!searchText.trim()?`当前命中 ${filteredCands.length} 位候选人`:sortMode==="interview"?"已排期候选人按面试时间置顶":"候选人会按上传顺序与最近活动自动排序"}
           </div>
         </div>
         <div style={{overflowY:"auto",maxHeight:"calc(100vh - 208px)",padding:"10px 10px 12px"}}>
