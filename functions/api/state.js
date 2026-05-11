@@ -128,6 +128,39 @@ function pickRicherValue(preferred, fallback) {
   return preferred;
 }
 
+function mergeInterviews(newerInterviews = [], olderInterviews = []) {
+  // If newer has no interviews, keep older
+  if (!Array.isArray(newerInterviews) || !newerInterviews.length) return olderInterviews;
+  // If older has no interviews, use newer
+  if (!Array.isArray(olderInterviews) || !olderInterviews.length) return newerInterviews;
+
+  // Merge interviews by round/date, preserving all fields including extractedQA
+  const merged = [...newerInterviews]; // Start with newer interviews
+
+  // For each older interview, if it has data newer doesn't have, merge it in
+  olderInterviews.forEach(olderInterview => {
+    if (!olderInterview) return;
+    const newerMatch = merged.find(ni =>
+      ni && ((ni.round && olderInterview.round && ni.round === olderInterview.round) ||
+             (ni.date && olderInterview.date && ni.date === olderInterview.date))
+    );
+
+    if (!newerMatch) {
+      // No matching interview in newer array, add the older one
+      merged.push(olderInterview);
+    } else {
+      // Merge the matched interviews, preserving all fields
+      Object.keys(olderInterview).forEach(key => {
+        if (newerMatch[key] == null || newerMatch[key] === "") {
+          newerMatch[key] = olderInterview[key];
+        }
+      });
+    }
+  });
+
+  return merged;
+}
+
 function previewPagesCount(preview) {
   if (!preview?.src) return 0;
   return Array.isArray(preview.pages) && preview.pages.length ? preview.pages.length : 1;
@@ -185,7 +218,7 @@ function mergeCandidateRecord(left, right) {
     resumePreview: pickPreferredResumePreview(newer?.resumePreview, older?.resumePreview),
     screening: pickRicherValue(newer?.screening, older?.screening),
     questions: pickRicherValue(newer?.questions, older?.questions) || null,
-    interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
+    interviews: mergeInterviews(newer?.interviews, older?.interviews),
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
     interviewLocation: newer?.interviewLocation ?? older?.interviewLocation ?? null,
