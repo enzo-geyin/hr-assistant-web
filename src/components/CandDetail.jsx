@@ -8,7 +8,7 @@ import {
   formatRubricContext, formatQuestionBankContext, mergeQuestionFeedbackHistory, getQuestionBankSourceMeta,
   getQuestionFeedbackOption, QUESTION_FEEDBACK_OPTIONS, getInterviewRoundsForJob, isSingleRoundLevel,
   transcribeAudioFile, learnFromDirectorFeedback, KNOWLEDGE_MIN_SAMPLES, getFinalAiRecommendation, cleanListLine,
-  getAiVerdictTone, getHumanVerdictTone
+  getAiVerdictTone, getHumanVerdictTone, fetchCloudPreview
 } from "../App.jsx";
 
 function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
@@ -20,11 +20,38 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const [previewPage,setPreviewPage]=useState(0);
   const [replaceLoading,setReplaceLoading]=useState(false);
   const [replaceErr,setReplaceErr]=useState("");
+  const [cloudPreview,setCloudPreview]=useState(null);
+  const [cloudPreviewLoading,setCloudPreviewLoading]=useState(false);
+  const [cloudPreviewError,setCloudPreviewError]=useState("");
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
   const resumeKeywordHits=extractRoleKeywordHits(previewResume);
-  const visualPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
+  const localPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
+  const visualPreview=localPreview?.src ? localPreview : (cloudPreview || null);
+  useEffect(()=>{
+    setCloudPreview(null);
+    setCloudPreviewError("");
+    if(localPreview?.src) return;
+    if(!cand?.id) return;
+    if(cand?.resumePreviewStatus==="none") return;
+    let cancelled=false;
+    setCloudPreviewLoading(true);
+    fetchCloudPreview(cfg?.proxyToken||"", cand.id)
+      .then(preview=>{
+        if(cancelled) return;
+        setCloudPreview(preview||null);
+      })
+      .catch(error=>{
+        if(cancelled) return;
+        setCloudPreviewError(error?.message||"加载云端简历快照失败");
+      })
+      .finally(()=>{
+        if(cancelled) return;
+        setCloudPreviewLoading(false);
+      });
+    return ()=>{cancelled=true;};
+  },[cand?.id, localPreview?.src, cand?.resumePreviewStatus, cfg?.proxyToken]);
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
@@ -257,9 +284,11 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
             <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.02em"}}>{previewTitle}</div>
             <div style={{fontSize:11,color:T.text4,marginTop:5,lineHeight:1.7}}>
               {cand.resumeFileName?`来源文件：${cand.resumeFileName}`:"来源：手动录入 / 识别结果"}
-              {!visualPreview?.src&&cand.resumeFileName?" · 当前未保存原始版式预览":""}
+              {!visualPreview?.src&&cand.resumeFileName&&!cloudPreviewLoading?" · 当前未保存原始版式预览":""}
               {visualPreview?.previewMode==="light"?" · 当前先展示批量导入轻量预览":""}
               {cand.resumePreviewStatus==="generating"?" · 完整预览正在后台生成，稍后会自动补齐":""}
+              {cloudPreviewLoading?" · 正在按需加载云端简历快照…":""}
+              {cloudPreviewError?` · 云端简历快照加载失败：${cloudPreviewError}`:""}
             </div>
           </div>
           <button

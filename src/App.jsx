@@ -8,6 +8,7 @@ const save = (k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 const ENV_PROXY_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_URL?import.meta.env.VITE_HR_PROXY_URL:"/api/ai";
 const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_TOKEN?import.meta.env.VITE_HR_PROXY_TOKEN:"";
 const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
+const ENV_PREVIEW_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PREVIEW_URL?import.meta.env.VITE_HR_PREVIEW_URL:"/api/preview";
 const ENV_KNOWLEDGE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_KNOWLEDGE_URL?import.meta.env.VITE_HR_KNOWLEDGE_URL:"/api/knowledge";
 const ENV_MODEL_STATUS_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_MODEL_STATUS_URL?import.meta.env.VITE_HR_MODEL_STATUS_URL:"/api/model-status";
 const ENV_TRANSCRIBE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_TRANSCRIBE_URL?import.meta.env.VITE_HR_TRANSCRIBE_URL:"/api/transcribe";
@@ -264,6 +265,16 @@ async function fetchCloudState(token = "") {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `云端读取失败 ${res.status}`);
   return data;
+}
+
+export async function fetchCloudPreview(token = "", candidateId = "") {
+  const id = String(candidateId || "").trim();
+  if (!id) return null;
+  const url = `${ENV_PREVIEW_URL}?id=${encodeURIComponent(id)}`;
+  const res = await fetch(url, { headers: buildCloudHeaders(token) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `云端简历快照读取失败 ${res.status}`);
+  return data?.preview || null;
 }
 
 async function pushCloudState(token = "", state) {

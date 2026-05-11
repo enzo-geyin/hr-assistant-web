@@ -306,35 +306,11 @@ async function readState(db) {
   } catch {
     parsed = null;
   }
-  const previewRows = await db.prepare(SELECT_PREVIEWS_SQL).all().catch(() => ({ results: [] }));
-  const previewMap = new Map(
-    ((previewRows && Array.isArray(previewRows.results)) ? previewRows.results : [])
-      .map(item => {
-        try {
-          return [String(item.candidate_id || "").trim(), JSON.parse(item.preview_payload)];
-        } catch {
-          return [String(item.candidate_id || "").trim(), null];
-        }
-      })
-      .filter(([candidateId, preview]) => candidateId && preview?.src)
-  );
-  const stateWithPreviews = parsed && typeof parsed === "object"
-    ? {
-        ...parsed,
-        cands: (Array.isArray(parsed.cands) ? parsed.cands : []).map(candidate => {
-          const preview = previewMap.get(String(candidate?.id || "").trim());
-          return preview
-            ? {
-                ...candidate,
-                resumePreview: pickPreferredResumePreview(candidate?.resumePreview, preview),
-                resumePreviewCloud: pickPreferredResumePreview(candidate?.resumePreviewCloud, preview),
-              }
-            : candidate;
-        }),
-      }
-    : parsed;
+  // Preview blobs are fetched on-demand via /api/preview?id=xxx to keep
+  // GET /api/state under the Cloudflare Workers CPU limit. The state JSON
+  // here intentionally omits resumePreview/resumePreviewCloud payloads.
   return {
-    state: stateWithPreviews,
+    state: parsed,
     updatedAt: row.updated_at || "",
     schemaVersion: row.schema_version || SCHEMA_VERSION,
   };
