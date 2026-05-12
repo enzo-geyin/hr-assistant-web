@@ -26,6 +26,10 @@ const SELECT_PREVIEWS_SQL = `
   SELECT candidate_id, preview_payload, updated_at
   FROM hr_resume_previews
 `;
+const SELECT_PREVIEW_IDS_SQL = `
+  SELECT candidate_id
+  FROM hr_resume_previews
+`;
 const UPSERT_PREVIEW_SQL = `
   INSERT INTO hr_resume_previews (candidate_id, preview_payload, updated_at)
   VALUES (?1, ?2, ?3)
@@ -376,7 +380,7 @@ export async function onRequest(context) {
           now
         )
         .run();
-      const previewRows = await env.DB.prepare(SELECT_PREVIEWS_SQL).all().catch(() => ({ results: [] }));
+      const previewRows = await env.DB.prepare(SELECT_PREVIEW_IDS_SQL).all().catch(() => ({ results: [] }));
       const existingPreviewIds = ((previewRows && Array.isArray(previewRows.results)) ? previewRows.results : [])
         .map(item => String(item.candidate_id || "").trim())
         .filter(Boolean);
@@ -388,7 +392,7 @@ export async function onRequest(context) {
       for (const entry of previewEntries) {
         await env.DB.prepare(UPSERT_PREVIEW_SQL).bind(entry.candidateId, entry.payload, entry.updatedAt).run();
       }
-      return json({ ok: true, updatedAt: now, state: merged });
+      return json({ ok: true, updatedAt: now });
     } catch (error) {
       return json({ error: error?.message || "保存云端状态失败" }, 500);
     }
