@@ -280,9 +280,9 @@ async function handleRequest(request, env) {
     const firstPass = await requestUpstreamJSON(prov, apiKey, { model: resolvedModel, system, user, file, maxTokens: normalizedMaxTokens });
     let parsed = firstPass.parsed;
     let usage = { ...firstPass.usage, provider: resolvedProvider };
-    if (resolvedProvider === "deepseek" && resolvedModel === "deepseek-reasoner" && (!parsed || typeof parsed !== "object")) {
+    if (resolvedProvider === "deepseek" && resolvedModel === "deepseek-v4-pro" && (!parsed || typeof parsed !== "object")) {
       const fallback = await requestUpstreamJSON(prov, apiKey, {
-        model: "deepseek-chat",
+        model: "deepseek-v4-flash",
         system: `${system}\n\n补充要求：你现在用于结构化输出环节，必须返回稳定 JSON，不要输出思考过程、解释或代码块。`,
         user,
         file,

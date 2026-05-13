@@ -128,6 +128,34 @@ const pickRicherValue = (preferred, fallback) => {
   return preferred;
 };
 
+// 客户端版逐轮合并，与服务端 functions/api/state.js:mergeInterviews 同款逻辑。
+// 关键：保留 extractedQA、interview_location 等子字段，避免整段替换导致数据丢失。
+const mergeInterviewsList = (newerInterviews = [], olderInterviews = []) => {
+  if (!Array.isArray(newerInterviews) || !newerInterviews.length) return olderInterviews || [];
+  if (!Array.isArray(olderInterviews) || !olderInterviews.length) return newerInterviews;
+  const merged = newerInterviews.map(item => ({ ...item }));
+  olderInterviews.forEach(olderInterview => {
+    if (!olderInterview) return;
+    const newerMatch = merged.find(ni =>
+      ni && (
+        (olderInterview.id != null && ni.id != null && ni.id === olderInterview.id) ||
+        (ni.round && olderInterview.round && ni.round === olderInterview.round) ||
+        (ni.date && olderInterview.date && ni.date === olderInterview.date)
+      )
+    );
+    if (!newerMatch) {
+      merged.push(olderInterview);
+      return;
+    }
+    Object.keys(olderInterview).forEach(key => {
+      if (newerMatch[key] == null || newerMatch[key] === "") {
+        newerMatch[key] = olderInterview[key];
+      }
+    });
+  });
+  return merged;
+};
+
 const mergeCandidateRecord = (left, right) => {
   const newer = entityTime(left) > entityTime(right) ? left : right;
   const older = newer === left ? right : left;
@@ -149,7 +177,7 @@ const mergeCandidateRecord = (left, right) => {
     resumePreviewCloud: pickPreferredResumePreview(newer?.resumePreviewCloud, older?.resumePreviewCloud),
     screening: pickRicherValue(newer?.screening, older?.screening),
     questions: pickRicherValue(newer?.questions, older?.questions) || null,
-    interviews: pickRicherValue(newer?.interviews, older?.interviews) || [],
+    interviews: mergeInterviewsList(newer?.interviews, older?.interviews),
     scheduledAt: pickRicherValue(newer?.scheduledAt, older?.scheduledAt) || null,
     interviewRound: pickRicherValue(newer?.interviewRound, older?.interviewRound) || null,
     interviewLocation: newer?.interviewLocation ?? older?.interviewLocation ?? null,
@@ -892,7 +920,8 @@ ${learningCtx?`\n${learningCtx}`:""}
 要求：
 1. roleDirection 必须根据候选人过去真实做过的岗位来判断，不能泛泛写成“运营”。
 2. 如果候选人更偏内容/编导/剪辑，就不要匹配到投流岗；如果更偏店铺运营，就不要误匹配到内容岗。
-3. matchedJobReason 要明确说明你是根据哪些经历、产品、工具、产出和结果做出的岗位判断。`;
+3. matchedJobReason 要明确说明你是根据哪些经历、产品、工具、产出和结果做出的岗位判断。
+4. candidateName 必须是简历正文中明确标注的真实姓名（中文2-6字 或 英文4字以上）；如果简历开头没有清晰的"姓名/Name"标签，或只看到 PDF 水印/页眉里的零散英文片段，直接返回空字符串，不要从邮箱前缀、英文水印、教育/工作经历中拼凑出名字。`;
 };
 
 const INTERVIEW_RULES_PROMPT = `【面试题生成准则】
@@ -2222,14 +2251,16 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    return createResumeVisualPreview(file, { maxPages: 1, scale: 0.72, imageQuality: 0.62 });
+    // 提升清晰度：scale 0.72→1.5、quality 0.62→0.92。
+    // 单页 preview 经 /api/preview 按需返回，单条 D1 行约 250-400KB，仍在 CPU 与 PUT 4MB 限制内。
+    return createResumeVisualPreview(file, { maxPages: 1, scale: 1.5, imageQuality: 0.92 });
   }
   if (kind === "image") {
     return createResumeVisualPreview(file, {
-      imageQuality: 0.7,
+      imageQuality: 0.92,
       forceImageCompression: true,
-      imageMaxWidth: 900,
-      imageMaxHeight: 1280,
+      imageMaxWidth: 1400,
+      imageMaxHeight: 1900,
     });
   }
   return null;
@@ -2242,6 +2273,44 @@ export const extractFileText = async file => {
   if (kind==="pdf") return extractPdfText(file);
   if (kind==="image") return extractImageText(file);
   throw new Error("暂不支持该文件格式");
+};
+
+// 从文件名提取姓名：去掉扩展名、常见后缀（"-简历"、"_简历"、"的简历"等）
+export const extractNameFromFileName = (fileName = "") => {
+  const base = String(fileName || "").replace(/\.[^./\\]+$/, "").trim();
+  if (!base) return "";
+  return base
+    .replace(/[-_\s]*(简历|个人简历|求职简历|应聘简历|Resume|CV)[-_\s]*/gi, "")
+    .replace(/[-_\s]*(的|-).*$/, "")
+    .trim();
+};
+
+// 校验 AI 返回的候选人姓名是否合理：
+//  - 必须是 2-15 字符
+//  - 中文 2-6 字 / 英文 ≥ 4 字符 / 中英混合也接受
+//  - 排除明显的错误识别（纯英文 2-3 字、纯标点等）
+export const isValidCandidateName = name => {
+  const trimmed = String(name || "").trim();
+  if (!trimmed) return false;
+  if (trimmed.length < 2 || trimmed.length > 15) return false;
+  if (/^(未命名|未知|候选人|Unknown|N\/A|None|null)$/i.test(trimmed)) return false;
+  const cnChars = (trimmed.match(/[一-龥]/g) || []).length;
+  if (cnChars >= 2) return true;
+  const enChars = (trimmed.match(/[A-Za-z]/g) || []).length;
+  if (enChars >= 4 && cnChars === 0) return true;
+  if (cnChars >= 1 && enChars >= 2) return true;
+  return false;
+};
+
+// 综合解析候选人姓名：AI 返回 → 校验 → 文件名 fallback → "未命名"
+export const resolveCandidateName = ({ aiName = "", manualName = "", fileName = "" } = {}) => {
+  const manual = String(manualName || "").trim();
+  if (manual) return manual;
+  const ai = String(aiName || "").trim();
+  if (isValidCandidateName(ai)) return ai;
+  const fromFile = extractNameFromFileName(fileName);
+  if (isValidCandidateName(fromFile)) return fromFile;
+  return "未命名";
 };
 
 export async function transcribeAudioFile(cfg, file) {
@@ -2504,7 +2573,11 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
-  const candidateName = screening.candidateName || candidate?.name || "未命名";
+  const candidateName = resolveCandidateName({
+    aiName: screening.candidateName,
+    manualName: candidate?.name,
+    fileName: file.name,
+  });
   const resumeSignature = buildResumeSignature(normalizedResume);
   const duplicateCandidate = findDuplicateResumeCandidate(existingCandidates, {
     candidateName,
@@ -2545,7 +2618,11 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
   const extractedResume = await extractFileText(file);
   const { normalizedResume, screening } = await runResumeScreening(cfg, job, extractedResume, onTokens, dirCtx, job ? [] : jobs);
   const matchedJob = job || resolveMatchedJob(jobs, screening, normalizedResume);
-  const candidateName = name.trim() || screening.candidateName || "未命名";
+  const candidateName = resolveCandidateName({
+    aiName: screening.candidateName,
+    manualName: name,
+    fileName: file.name,
+  });
   const resumeSignature = buildResumeSignature(normalizedResume);
   const duplicateCandidate = findDuplicateResumeCandidate(existingCandidates, {
     candidateName,

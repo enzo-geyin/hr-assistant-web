@@ -145,8 +145,11 @@ function mergeInterviews(newerInterviews = [], olderInterviews = []) {
   olderInterviews.forEach(olderInterview => {
     if (!olderInterview) return;
     const newerMatch = merged.find(ni =>
-      ni && ((ni.round && olderInterview.round && ni.round === olderInterview.round) ||
-             (ni.date && olderInterview.date && ni.date === olderInterview.date))
+      ni && (
+        (olderInterview.id != null && ni.id != null && ni.id === olderInterview.id) ||
+        (ni.round && olderInterview.round && ni.round === olderInterview.round) ||
+        (ni.date && olderInterview.date && ni.date === olderInterview.date)
+      )
     );
 
     if (!newerMatch) {

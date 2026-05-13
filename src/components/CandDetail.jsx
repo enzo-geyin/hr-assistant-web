@@ -29,6 +29,10 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const resumeKeywordHits=extractRoleKeywordHits(previewResume);
   const localPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
   const visualPreview=localPreview?.src ? localPreview : (cloudPreview || null);
+  const proxyTokenRef = useRef(cfg?.proxyToken || "");
+  useEffect(()=>{ proxyTokenRef.current = cfg?.proxyToken || ""; }, [cfg?.proxyToken]);
+  // 只依赖候选人本身（id / 状态 / 本地预览是否存在），不再因为 token 输入框
+  // 每改一个字就重发请求，避免设置页编辑 token 时简历预览反复闪烁。
   useEffect(()=>{
     setCloudPreview(null);
     setCloudPreviewError("");
@@ -37,7 +41,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
     if(cand?.resumePreviewStatus==="none") return;
     let cancelled=false;
     setCloudPreviewLoading(true);
-    fetchCloudPreview(cfg?.proxyToken||"", cand.id)
+    fetchCloudPreview(proxyTokenRef.current, cand.id)
       .then(preview=>{
         if(cancelled) return;
         setCloudPreview(preview||null);
@@ -51,7 +55,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
         setCloudPreviewLoading(false);
       });
     return ()=>{cancelled=true;};
-  },[cand?.id, localPreview?.src, cand?.resumePreviewStatus, cfg?.proxyToken]);
+  },[cand?.id, localPreview?.src, cand?.resumePreviewStatus]);
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
