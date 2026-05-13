@@ -2209,6 +2209,7 @@ export const createResumeVisualPreview = async (file, options = {}) => {
     forceImageCompression = false,
     imageMaxWidth = 1600,
     imageMaxHeight = 2200,
+    outputFormat = "png", // "png"（无损，体积大）或 "jpeg"（有损，体积小）
   } = options || {};
   const kind = getFileKind(file);
   if (kind === "image") {
@@ -2231,10 +2232,12 @@ export const createResumeVisualPreview = async (file, options = {}) => {
     const pdf = await pdfjsLib.getDocument({ data }).promise;
     const pages = [];
     const renderCount = Math.min(pdf.numPages, Math.max(1, Number.isFinite(maxPages) ? maxPages : pdf.numPages));
+    const mime = outputFormat === "jpeg" ? "image/jpeg" : "image/png";
     for (let pageNumber = 1; pageNumber <= renderCount; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const canvas = await renderPdfPageToCanvas(page, scale);
-      pages.push(canvas.toDataURL("image/png"));
+      // PNG 忽略 quality 参数；JPEG 接受 0-1 quality。两者一起传 toDataURL 内部会自动处理。
+      pages.push(canvas.toDataURL(mime, imageQuality));
     }
     return {
       kind: "pdf",
@@ -2251,13 +2254,22 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 提升清晰度：scale 0.72→1.5、quality 0.62→0.92。
-    // 单页 preview 经 /api/preview 按需返回，单条 D1 行约 250-400KB，仍在 CPU 与 PUT 4MB 限制内。
-    return createResumeVisualPreview(file, { maxPages: 1, scale: 1.5, imageQuality: 0.92 });
+    // 清晰度方案：scale 2.0（A4 ≈ 1188×1684，中文小字清晰）+ JPEG 95%（体积可控）。
+    // PNG 在 scale 1.5 下虽然无损但分辨率不够，scale 2.0 PNG 体积超 PUT 4MB 限制；
+    // 改用 JPEG 95% 后单页约 300-500KB，可同步多张新简历不超限。
+    return createResumeVisualPreview(file, {
+      maxPages: 1,
+      scale: 2.0,
+      imageQuality: 0.95,
+      outputFormat: "jpeg",
+    });
   }
   if (kind === "image") {
+    // 图片简历直接压到 1400×1900、JPEG 95%。compressImageDataUrl 内部已用 PNG，
+    // 这里需要让它走 JPEG 路径——但 compressImageDataUrl 当前硬编码 PNG，
+    // 暂时保持现状（图片简历通常本身就是 JPEG，体积可控）。
     return createResumeVisualPreview(file, {
-      imageQuality: 0.92,
+      imageQuality: 0.95,
       forceImageCompression: true,
       imageMaxWidth: 1400,
       imageMaxHeight: 1900,
@@ -2593,7 +2605,11 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
     resumeFileName: file.name,
     resumePreview,
     resumePreviewCloud,
-    resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
+    // 只要本地或云端任一有 preview src 就不是 none，避免本地生成失败但云端成功时
+    // CandDetail short-circuit 跳过云端 fetch、导致看上去"图片丢了"。
+    resumePreviewStatus: (resumePreview?.src || resumePreviewCloud?.src)
+      ? (resumePreview?.src && resumePreview?.previewMode==="light" ? "generating" : "ready")
+      : "none",
     screening,
     ...resolveScreeningStatusPatch(candidate, screening.overallScore),
     questions: null,
@@ -2642,7 +2658,10 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       resumeFileName: file.name,
       resumePreview,
       resumePreviewCloud,
-      resumePreviewStatus: resumePreview?.src ? (resumePreview?.previewMode==="light" ? "generating" : "ready") : "none",
+      // 同 buildCandidateResumeUpdate：本地/云端任一有 src 都视为有原始预览。
+      resumePreviewStatus: (resumePreview?.src || resumePreviewCloud?.src)
+        ? (resumePreview?.src && resumePreview?.previewMode==="light" ? "generating" : "ready")
+        : "none",
       screening,
       questions: null,
       interviews: [],

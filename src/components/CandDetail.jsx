@@ -38,7 +38,9 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
     setCloudPreviewError("");
     if(localPreview?.src) return;
     if(!cand?.id) return;
-    if(cand?.resumePreviewStatus==="none") return;
+    // 不再依据 resumePreviewStatus==="none" 跳过云端 fetch：
+    // 历史候选人可能被旧代码误标 none（其实云端有 preview）。
+    // 单次 D1 SELECT 开销很小，宁可多查 404 也别让历史数据看上去"丢了"。
     let cancelled=false;
     setCloudPreviewLoading(true);
     fetchCloudPreview(proxyTokenRef.current, cand.id)
@@ -55,7 +57,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
         setCloudPreviewLoading(false);
       });
     return ()=>{cancelled=true;};
-  },[cand?.id, localPreview?.src, cand?.resumePreviewStatus]);
+  },[cand?.id, localPreview?.src]);
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
