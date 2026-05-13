@@ -2259,7 +2259,7 @@ export const createCloudResumePreview = async file => {
     // 改用 JPEG 95% 后单页约 300-500KB，可同步多张新简历不超限。
     return createResumeVisualPreview(file, {
       maxPages: 1,
-      scale: 2.0,
+      scale: 3.0,
       imageQuality: 0.95,
       outputFormat: "jpeg",
     });
