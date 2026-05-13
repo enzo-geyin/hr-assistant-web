@@ -2133,8 +2133,15 @@ const extractImageText = async file => {
   return ocrSource(file, "图片");
 };
 
-const renderPdfPageToCanvas = async (page, scale = 1.8) => {
-  const viewport = page.getViewport({ scale });
+const renderPdfPageToCanvas = async (page, scale = 1.8, options = {}) => {
+  // outputScale 控制物理像素倍数，解决 Retina 屏渲染糊的问题：
+  // - 不传 → 自动用客户端 devicePixelRatio（最多 2），让本地预览匹配屏幕
+  // - 显式传值（如 cloud preview 固定为 2）→ 跨设备一致的高清版本
+  const fallbackDpr = typeof window !== "undefined" && window.devicePixelRatio
+    ? Math.max(1, Math.min(window.devicePixelRatio, 2))
+    : 1;
+  const outputScale = options.outputScale ?? fallbackDpr;
+  const viewport = page.getViewport({ scale: scale * outputScale });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d", { alpha: false });
   canvas.width = Math.ceil(viewport.width);
@@ -2210,6 +2217,7 @@ export const createResumeVisualPreview = async (file, options = {}) => {
     imageMaxWidth = 1600,
     imageMaxHeight = 2200,
     outputFormat = "png", // "png"（无损，体积大）或 "jpeg"（有损，体积小）
+    outputScale, // 物理像素倍数；不传则用客户端 DPR；cloud preview 应传 2 保跨设备一致
   } = options || {};
   const kind = getFileKind(file);
   if (kind === "image") {
@@ -2235,7 +2243,7 @@ export const createResumeVisualPreview = async (file, options = {}) => {
     const mime = outputFormat === "jpeg" ? "image/jpeg" : "image/png";
     for (let pageNumber = 1; pageNumber <= renderCount; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
-      const canvas = await renderPdfPageToCanvas(page, scale);
+      const canvas = await renderPdfPageToCanvas(page, scale, outputScale !== undefined ? { outputScale } : {});
       // PNG 忽略 quality 参数；JPEG 接受 0-1 quality。两者一起传 toDataURL 内部会自动处理。
       pages.push(canvas.toDataURL(mime, imageQuality));
     }
@@ -2254,13 +2262,14 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 清晰度方案：scale 2.0（A4 ≈ 1188×1684，中文小字清晰）+ JPEG 95%（体积可控）。
-    // PNG 在 scale 1.5 下虽然无损但分辨率不够，scale 2.0 PNG 体积超 PUT 4MB 限制；
-    // 改用 JPEG 95% 后单页约 300-500KB，可同步多张新简历不超限。
+    // 清晰度方案：scale 2.0 × outputScale 2 = 4x 物理像素（A4 ≈ 2380×3368 = 8MP）。
+    // 之前 scale 3.0 不带 DPR 适配，Retina 屏只渲染 1.5x 物理像素必糊。
+    // 现在 outputScale 固定 2 跨设备一致，单页 JPEG 92% 约 600KB-1MB，远低于 PUT 4MB。
     return createResumeVisualPreview(file, {
       maxPages: 1,
-      scale: 3.0,
-      imageQuality: 0.95,
+      scale: 2.0,
+      outputScale: 2,
+      imageQuality: 0.92,
       outputFormat: "jpeg",
     });
   }
