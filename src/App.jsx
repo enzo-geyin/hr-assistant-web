@@ -2560,7 +2560,7 @@ export async function runResumeScreening(cfg, job, resumeText, onTokens, dirCtx 
     buildScreeningPrompt(job, normalizedResume, formatRubricContext(learning), jobOptions),
     onTokens,
     dirCtx,
-    { maxTokens: 2200 }
+    { maxTokens: 3200 }
   );
   if (screening.error) throw new Error(screening.raw || screening.error);
   return { normalizedResume, screening, learning };
