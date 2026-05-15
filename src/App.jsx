@@ -74,10 +74,27 @@ const pickPreferredResumePreview = (primary, fallback) => {
 };
 
 const buildCloudSafeResumePreview = candidate => {
-  const preview = candidate?.resumePreviewCloud || candidate?.resumePreview;
-  if (!preview?.src) return null;
-  const firstPage = (Array.isArray(preview.pages) && preview.pages.length ? preview.pages[0] : preview.src) || preview.src;
-  if (!firstPage) return null;
+  // 优先用体积更大的版本（无损 PNG > 压缩 JPEG）。
+  // 历史上 cloud 版本总是低清 JPEG，但 PUT body 限制 4MB 是按整个 payload 算的，
+  // 单页 PNG 高清版约 1.5-3MB 通常安全，超限时再回退到 cloud 压缩版。
+  const local = candidate?.resumePreview;
+  const cloud = candidate?.resumePreviewCloud;
+  const localFirst = local?.src && Array.isArray(local.pages) && local.pages.length ? local.pages[0] : local?.src;
+  const cloudFirst = cloud?.src && Array.isArray(cloud.pages) && cloud.pages.length ? cloud.pages[0] : cloud?.src;
+  const SAFE_SINGLE_PAGE = 3.5 * 1024 * 1024; // 单页 base64 上限 3.5MB（PUT 4MB body 留余量）
+  let preview = null;
+  let firstPage = "";
+  if (localFirst && localFirst.length <= SAFE_SINGLE_PAGE && (!cloudFirst || localFirst.length >= cloudFirst.length)) {
+    preview = local;
+    firstPage = localFirst;
+  } else if (cloudFirst) {
+    preview = cloud;
+    firstPage = cloudFirst;
+  } else if (localFirst) {
+    preview = local;
+    firstPage = localFirst;
+  }
+  if (!preview?.src || !firstPage) return null;
   return {
     kind: preview.kind || "image",
     src: firstPage,
@@ -2262,15 +2279,15 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 清晰度方案：scale 2.0 × outputScale 2 = 4x 物理像素（A4 ≈ 2380×3368 = 8MP）。
-    // 之前 scale 3.0 不带 DPR 适配，Retina 屏只渲染 1.5x 物理像素必糊。
-    // 现在 outputScale 固定 2 跨设备一致，单页 JPEG 92% 约 600KB-1MB，远低于 PUT 4MB。
+    // 终极清晰度方案：PNG 无损 + scale 2.0 × outputScale 2 = 4x 物理像素。
+    // 之前一直用 JPEG 二次压缩，无论 quality 多高都有不可逆损耗——这是历次"糊"的根因。
+    // PNG 单页约 1.5-3MB（A4 2380×3368 像素），PUT 4MB body 单候选人安全；
+    // 多候选人批量同步逼近上限时，buildCloudSafeResumePreview 会自动回退到低清版。
     return createResumeVisualPreview(file, {
       maxPages: 1,
       scale: 2.0,
       outputScale: 2,
-      imageQuality: 0.92,
-      outputFormat: "jpeg",
+      outputFormat: "png",
     });
   }
   if (kind === "image") {
