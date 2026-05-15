@@ -938,6 +938,7 @@ ${!job?.title && !job?.requirements && jobOptions.length?`\n${buildJobOptionsCon
 ${learningCtx?`\n${learningCtx}`:""}
 薪酬：${job?.salary||"不限"} 简历：${resume}
 输出JSON：{"candidateName":"候选人姓名（如能识别）","roleDirection":"候选人更偏向的岗位方向，例如店铺运营/短视频编导/信息流投放/剪辑后期","matchedJobTitle":"最匹配的岗位名称；若都不匹配则留空","matchedJobReason":"为什么匹配这个岗位，或为什么不匹配任何岗位","matchedJobConfidence":"高|中|低","summary":"2-3句综合评价","recommendation":"建议通过|待定|建议淘汰","overallScore":4.5,
+"skillTags":["从简历正文中抽取的5-15个有信息量的关键标签"],
 "t0":{"score":4.2,"items":[{"requirement":"条件","level":"高|中|低","score":4,"maxScore":5,"note":"说明"}]},
 "t1":{"items":[{"dimension":"维度","note":"依据","score":4,"maxScore":5}]},
 "t2":{"items":[{"item":"加分项","has":true,"note":"依据"}]},
@@ -947,7 +948,13 @@ ${learningCtx?`\n${learningCtx}`:""}
 1. roleDirection 必须根据候选人过去真实做过的岗位来判断，不能泛泛写成“运营”。
 2. 如果候选人更偏内容/编导/剪辑，就不要匹配到投流岗；如果更偏店铺运营，就不要误匹配到内容岗。
 3. matchedJobReason 要明确说明你是根据哪些经历、产品、工具、产出和结果做出的岗位判断。
-4. candidateName 必须是简历正文中明确标注的真实姓名（中文2-6字 或 英文4字以上）；如果简历开头没有清晰的"姓名/Name"标签，或只看到 PDF 水印/页眉里的零散英文片段，直接返回空字符串，不要从邮箱前缀、英文水印、教育/工作经历中拼凑出名字。`;
+4. candidateName 必须是简历正文中明确标注的真实姓名（中文2-6字 或 英文4字以上）；如果简历开头没有清晰的"姓名/Name"标签，或只看到 PDF 水印/页眉里的零散英文片段，直接返回空字符串，不要从邮箱前缀、英文水印、教育/工作经历中拼凑出名字。
+5. skillTags 规则：从简历正文里抽取 5-15 个**最有信息量**的关键词作为快速浏览标签。
+   - 必须用简历里出现过的原词或紧贴原词的标准化形式（如"千川"、"ROI"、"GMV"、"抖音"、"快手"、"淘宝"、"信息流投放"、"短视频编导"、"剪辑"、"PR"、"Figma"、"SQL"、"Python"、"用户增长"等）。
+   - 优先抽：平台名（抖音/快手/小红书/淘宝/京东/拼多多/天猫/B站/微博等）、工具/产品名（千川/磁力金牛/巨量引擎/PR/AE/Figma/Tableau/神策等）、核心技能（投流/选品/直播/编导/剪辑/数据分析/用户增长/产品运营等）、关键指标（ROI/GMV/CPM/CTR/CVR/DAU/MAU/客单价等）、行业（电商/直播带货/跨境/教育/医美/金融等）。
+   - 排除：泛词（"运营"、"工作"、"经验"、"项目"）、整句、超过 8 字的长短语。
+   - 每个标签 1-8 字，去重，按重要性排序。
+   - 即使简历内容偏冷门领域（如医疗/法律/工程），也照此规则抽取该领域的专业标签。`;
 };
 
 const INTERVIEW_RULES_PROMPT = `【面试题生成准则】

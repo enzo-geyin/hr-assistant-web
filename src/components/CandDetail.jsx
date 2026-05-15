@@ -26,7 +26,11 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
-  const resumeKeywordHits=extractRoleKeywordHits(previewResume);
+  // 优先用 AI 筛选时抽取的 skillTags（任意领域都准），老候选人没有时回退到本地词典。
+  const aiSkillTags = Array.isArray(cand?.screening?.skillTags)
+    ? cand.screening.skillTags.filter(tag => typeof tag === "string" && tag.trim()).slice(0, 30)
+    : [];
+  const resumeKeywordHits = aiSkillTags.length ? aiSkillTags : extractRoleKeywordHits(previewResume);
   const localPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
   const visualPreview=localPreview?.src ? localPreview : (cloudPreview || null);
   const proxyTokenRef = useRef(cfg?.proxyToken || "");
