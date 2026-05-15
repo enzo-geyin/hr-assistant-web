@@ -2279,13 +2279,13 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 终极清晰度方案：PNG 无损 + scale 2.0 × outputScale 2 = 4x 物理像素。
+    // 终极清晰度方案：PNG 无损 + scale 2.5 × outputScale 2 = 5x 物理像素。
     // 之前一直用 JPEG 二次压缩，无论 quality 多高都有不可逆损耗——这是历次"糊"的根因。
-    // PNG 单页约 1.5-3MB（A4 2380×3368 像素），PUT 4MB body 单候选人安全；
+    // PNG 单页约 2-3.5MB（A4 2975×4210 像素），PUT 4MB body 单候选人在兜底线内；
     // 多候选人批量同步逼近上限时，buildCloudSafeResumePreview 会自动回退到低清版。
     return createResumeVisualPreview(file, {
       maxPages: 1,
-      scale: 2.0,
+      scale: 2.5,
       outputScale: 2,
       outputFormat: "png",
     });
