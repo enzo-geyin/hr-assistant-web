@@ -57,16 +57,21 @@ Cloudflare Pages 部署时，前端和代理函数会走同一个域名，默认
 - 如果表还不存在，`/api/state` 会在首次请求时自动创建 `hr_state`
 - `/api/knowledge` 会自动创建 `learning_samples`、`rubric_versions`、`question_bank_versions`
 
-### 学习系统最小实现
+### AI 学习循环实现
 
-当前已经接入一版“招聘学习循环”：
+当前已接入完整的”招聘学习循环”：
 
-- 保存总监判断时，会自动写入 `learning_samples`
-- 同岗位样本累计到一定数量后，会自动生成新的 `rubric_versions`
-- 同时生成新的 `question_bank_versions`
-- 后续简历筛选和面试题生成，会优先读取最新规则和题库
+1. **面试记录阶段**：使用 LLM 从面试笔记中自动抽取结构化问答对（extractedQA 字段）
+2. **总监判断阶段**：将候选人 screening + extractedQA + 总监决策自动写入 `learning_samples`
+3. **学习反馈阶段**：同岗位样本累计后，自动生成新的 `rubric_versions` 和 `question_bank_versions`
+4. **出题优化阶段**：后续面试题生成会优先读取最新规则题库，并基于 extractedQA 避免重复出题
 
-这不是模型权重微调，而是“历史样本 -> 规则版本 -> 题库版本 -> 下次调用增强”的检索增强式学习。
+**技术实现**：
+- **标签识别**：AI 筛选时直接输出 skillTags 字段（5-15 个跨领域标签），替代硬编码词典
+- **问答抽取**：面试评估时调用 DeepSeek V4 Flash 从 Markdown 格式笔记中抽取问答对
+- **学习样本**：使用 DeepSeek V4 Pro 处理复杂的学习合成任务
+
+这是基于检索增强的学习循环，不涉及模型权重微调。
 
 注意：
 
