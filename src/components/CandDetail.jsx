@@ -162,12 +162,17 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            <span style={{padding:"6px 10px",borderRadius:8,background:"rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.7)",fontSize:11,fontFamily:"monospace"}}>
+              {previewNaturalWidth>0 ? (
+                `图源 ${previewNaturalWidth}px · 显示 ${Math.round(previewNaturalWidth*previewZoom/((typeof window!=="undefined"&&window.devicePixelRatio)||1))}css · DPR ${(typeof window!=="undefined"&&window.devicePixelRatio)||1} · ${Math.round(previewZoom*100)}%`
+              ) : "加载中…"}
+            </span>
             {visualPreview.kind==="pdf"&&previewPages.length>1&&<>
               <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage===0?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
               <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
             </>}
             <button onClick={()=>setPreviewZoom(z=>Math.max(0.3, Number((z-0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>缩小</button>
-            <button onClick={()=>setPreviewZoom(1)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>100%</button>
+            <button onClick={()=>setPreviewZoom(1)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>原图(1:1)</button>
             <button onClick={()=>setPreviewZoom(z=>Math.min(4, Number((z+0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>放大</button>
             <button onClick={()=>setShowPreviewLightbox(false)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"#fff",color:"#111827",cursor:"pointer",fontSize:13,fontWeight:800}}>关闭</button>
           </div>
@@ -210,7 +215,9 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
                   height:"auto",
                   borderRadius:12,
                   boxShadow:"0 20px 60px rgba(0,0,0,0.35)",
-                  background:"#fff"
+                  background:"#fff",
+                  imageRendering:"-webkit-optimize-contrast",
+                  WebkitFontSmoothing:"antialiased"
                 }}
               />
             </div>
@@ -360,7 +367,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
                   src={currentPreviewSrc}
                   alt={cand.resumeFileName||"简历预览"}
                   onClick={()=>{setPreviewZoom(1);setShowPreviewLightbox(true);}}
-                  style={{display:"block",width:"100%",maxHeight:520,objectFit:"contain",borderRadius:10,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in"}}
+                  style={{display:"block",width:"100%",maxHeight:520,objectFit:"contain",borderRadius:10,border:`1px solid ${T.border}`,background:"#f8fafc",cursor:"zoom-in",imageRendering:"-webkit-optimize-contrast"}}
                 />
                 {visualPreview.kind==="pdf"&&visualPreview.previewMode==="light"&&visualPreview.pageCount>previewPages.length&&<div style={{fontSize:11,color:T.text4,marginTop:10,lineHeight:1.7}}>
                   这是批量导入时保存的轻量预览，为了加速导入仅展示第一页。若需要完整页数预览，可在候选人详情里重新上传该简历。
