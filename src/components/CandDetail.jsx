@@ -16,7 +16,10 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const [showResumePreview,setShowResumePreview]=useState(true);
   const [showPreviewLightbox,setShowPreviewLightbox]=useState(false);
+  // previewZoom 语义：1 = 图片原始 1 像素对应屏幕 1 物理像素（最清晰）
+  // 之前是"父容器宽度 N%"，导致 5x 高清图被压缩到 lightbox 容器宽度，PDF 小字必糊
   const [previewZoom,setPreviewZoom]=useState(1);
+  const [previewNaturalWidth,setPreviewNaturalWidth]=useState(0);
   const [previewPage,setPreviewPage]=useState(0);
   const [replaceLoading,setReplaceLoading]=useState(false);
   const [replaceErr,setReplaceErr]=useState("");
@@ -72,6 +75,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
     setPreviewPage(0);
     setPreviewZoom(1);
     setShowPreviewLightbox(false);
+    setPreviewNaturalWidth(0);
   },[cand?.id, visualPreview?.src]);
   useEffect(()=>{
     setReplaceLoading(false);
@@ -162,13 +166,13 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
               <button onClick={()=>setPreviewPage(page=>Math.max(0,page-1))} disabled={previewPage===0} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage===0?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage===0?0.45:1}}>上一页</button>
               <button onClick={()=>setPreviewPage(page=>Math.min(previewPages.length-1,page+1))} disabled={previewPage>=previewPages.length-1} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:previewPage>=previewPages.length-1?"not-allowed":"pointer",fontSize:13,fontWeight:700,opacity:previewPage>=previewPages.length-1?0.45:1}}>下一页</button>
             </>}
-            <button onClick={()=>setPreviewZoom(z=>Math.max(0.8, Number((z-0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>缩小</button>
+            <button onClick={()=>setPreviewZoom(z=>Math.max(0.3, Number((z-0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>缩小</button>
             <button onClick={()=>setPreviewZoom(1)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>100%</button>
-            <button onClick={()=>setPreviewZoom(z=>Math.min(3, Number((z+0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>放大</button>
+            <button onClick={()=>setPreviewZoom(z=>Math.min(4, Number((z+0.2).toFixed(2))))} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"rgba(255,255,255,0.06)",color:"#fff",cursor:"pointer",fontSize:13,fontWeight:700}}>放大</button>
             <button onClick={()=>setShowPreviewLightbox(false)} style={{padding:"8px 12px",borderRadius:10,border:"1px solid rgba(255,255,255,0.14)",background:"#fff",color:"#111827",cursor:"pointer",fontSize:13,fontWeight:800}}>关闭</button>
           </div>
         </div>
-        <div style={{flex:1,overflow:"auto",padding:20,display:"flex",justifyContent:"center",alignItems:"flex-start",background:"#111827"}}>
+        <div data-lightbox-scroll="1" style={{flex:1,overflow:"auto",padding:20,display:"flex",justifyContent:"center",alignItems:"flex-start",background:"#111827"}}>
           <div style={{display:"grid",gridTemplateColumns:visualPreview.kind==="pdf"&&previewPages.length>1?"120px minmax(0,1fr)":"minmax(0,1fr)",gap:16,width:"100%",alignItems:"start"}}>
             {visualPreview.kind==="pdf"&&previewPages.length>1&&<div style={{display:"flex",flexDirection:"column",gap:10,maxHeight:"100%",overflow:"auto",paddingRight:4}}>
               {previewPages.map((pageSrc,index)=>(
@@ -186,7 +190,28 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
               <img
                 src={currentPreviewSrc}
                 alt={cand.resumeFileName||"简历预览"}
-                style={{display:"block",width:`${Math.round(previewZoom*100)}%`,maxWidth:"none",height:"auto",borderRadius:12,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",background:"#fff"}}
+                onLoad={e=>{
+                  const nw=e.target.naturalWidth||0;
+                  setPreviewNaturalWidth(nw);
+                  if(nw>0 && previewZoom===1){
+                    const dpr=(typeof window!=="undefined"&&window.devicePixelRatio)||1;
+                    const scroll=e.target.closest("[data-lightbox-scroll]");
+                    const cw=scroll ? scroll.clientWidth-48 : 1100;
+                    const fitZoom=(cw*dpr)/nw;
+                    if(fitZoom<1) setPreviewZoom(Math.max(0.3,Number(fitZoom.toFixed(2))));
+                  }
+                }}
+                style={{
+                  display:"block",
+                  width: previewNaturalWidth
+                    ? `${Math.round(previewNaturalWidth*previewZoom/((typeof window!=="undefined"&&window.devicePixelRatio)||1))}px`
+                    : "auto",
+                  maxWidth:"none",
+                  height:"auto",
+                  borderRadius:12,
+                  boxShadow:"0 20px 60px rgba(0,0,0,0.35)",
+                  background:"#fff"
+                }}
               />
             </div>
           </div>
