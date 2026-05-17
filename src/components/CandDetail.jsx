@@ -11,6 +11,26 @@ import {
   getAiVerdictTone, getHumanVerdictTone, fetchCloudPreview
 } from "../App.jsx";
 
+const previewPagesCount = preview => {
+  if (!preview?.src) return 0;
+  return Array.isArray(preview.pages) && preview.pages.length ? preview.pages.length : 1;
+};
+
+const displayPreviewWeight = preview => {
+  if (!preview?.src) return 0;
+  let score = 1;
+  if (preview.previewMode === "full") score += 40;
+  else if (preview.previewMode === "cloud") score += 35;
+  else if (preview.previewMode === "light") score += 5;
+  score += Math.min(previewPagesCount(preview), 8);
+  score += Math.min(String(preview.src || "").length / 100000, 20);
+  return score;
+};
+
+const pickBestDisplayPreview = (...previews) => previews
+  .filter(preview => preview?.src)
+  .sort((a, b) => displayPreviewWeight(b) - displayPreviewWeight(a))[0] || null;
+
 function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
@@ -34,8 +54,8 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
     ? cand.screening.skillTags.filter(tag => typeof tag === "string" && tag.trim()).slice(0, 30)
     : [];
   const resumeKeywordHits = aiSkillTags.length ? aiSkillTags : extractRoleKeywordHits(previewResume);
-  const localPreview=cand?.resumePreview || cand?.resumePreviewCloud || null;
-  const visualPreview=localPreview?.src ? localPreview : (cloudPreview || null);
+  const embeddedPreview=pickBestDisplayPreview(cand?.resumePreview, cand?.resumePreviewCloud);
+  const visualPreview=pickBestDisplayPreview(embeddedPreview, cloudPreview);
   const proxyTokenRef = useRef(cfg?.proxyToken || "");
   useEffect(()=>{ proxyTokenRef.current = cfg?.proxyToken || ""; }, [cfg?.proxyToken]);
   // 只依赖候选人本身（id / 状态 / 本地预览是否存在），不再因为 token 输入框
@@ -43,7 +63,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   useEffect(()=>{
     setCloudPreview(null);
     setCloudPreviewError("");
-    if(localPreview?.src) return;
+    if(embeddedPreview?.src && embeddedPreview.previewMode!=="light") return;
     if(!cand?.id) return;
     // 不再依据 resumePreviewStatus==="none" 跳过云端 fetch：
     // 历史候选人可能被旧代码误标 none（其实云端有 preview）。
@@ -64,7 +84,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
         setCloudPreviewLoading(false);
       });
     return ()=>{cancelled=true;};
-  },[cand?.id, localPreview?.src]);
+  },[cand?.id, embeddedPreview?.src, embeddedPreview?.previewMode]);
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
   const assignJob=jobIdValue=>{
