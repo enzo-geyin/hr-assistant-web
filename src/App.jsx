@@ -107,11 +107,23 @@ const buildCloudSafeResumePreview = candidate => {
 
 const sanitizeCandidateForCloud = candidate => {
   if (!candidate || typeof candidate !== "object") return candidate;
-  const { resumePreviewCloud, ...rest } = candidate;
-  return {
-    ...rest,
-    resumePreview: buildCloudSafeResumePreview(candidate),
-  };
+  const { resumePreview, resumePreviewCloud, ...rest } = candidate;
+  return rest;
+};
+
+const buildCloudPreviewEntries = (cands = [], deletedCandidateIds = [], changedSince = 0) => {
+  const cutoff = Number(changedSince) || 0;
+  return filterDeletedCandidates(cands, deletedCandidateIds)
+    .filter(candidate => {
+      if (!candidate?.id) return false;
+      if (!cutoff) return true;
+      return entityTime(candidate) >= cutoff - 5000;
+    })
+    .map(candidate => ({
+      candidateId: String(candidate.id).trim(),
+      preview: buildCloudSafeResumePreview(candidate),
+    }))
+    .filter(entry => entry.candidateId && entry.preview?.src);
 };
 
 const buildCloudSnapshot = (cfg, jobs, cands, usageLogs, deletedCandidateIds = []) => ({
@@ -331,6 +343,40 @@ async function pushCloudState(token = "", state) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `云端保存失败 ${res.status}`);
   return data;
+}
+
+async function putCloudPreview(token = "", entry) {
+  const id = String(entry?.candidateId || "").trim();
+  if (!id || !entry?.preview?.src) return null;
+  const res = await fetch(`${ENV_PREVIEW_URL}?id=${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { ...buildCloudHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ preview: entry.preview }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `简历快照保存失败 ${res.status}`);
+  return data;
+}
+
+async function pushCloudPreviews(token = "", entries = []) {
+  const list = Array.isArray(entries) ? entries.filter(entry => entry?.candidateId && entry?.preview?.src) : [];
+  if (!list.length) return { synced: 0, failed: 0 };
+  let cursor = 0;
+  let synced = 0;
+  let failed = 0;
+  const workers = Array.from({ length: Math.min(2, list.length) }, async () => {
+    while (cursor < list.length) {
+      const entry = list[cursor++];
+      try {
+        await putCloudPreview(token, entry);
+        synced += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  });
+  await Promise.all(workers);
+  return { synced, failed };
 }
 
 async function fetchModelStatus(token = "") {
@@ -2956,10 +3002,19 @@ export default function App() {
     const timer=setTimeout(async()=>{
       try{
         setCloud(prev=>({...prev,phase:"syncing",message:"正在同步到云端数据库..."}));
+        const currentCloudTs=latestCloudStateRef.current.cloudUpdatedAt?new Date(latestCloudStateRef.current.cloudUpdatedAt).getTime():0;
+        const previewEntries=buildCloudPreviewEntries(cands,deletedCandidateIds,currentCloudTs);
         const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
+        const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries);
         if(cancelled) return;
         latestCloudStateRef.current={...latestCloudStateRef.current,cloudUpdatedAt:payload.updatedAt||"",dirtyCandidateState:false};
-        setCloud({phase:"ready",message:"云端数据库已同步",updatedAt:payload.updatedAt||""});
+        setCloud({
+          phase:"ready",
+          message:previewSync.failed>0
+            ? `云端状态已同步，${previewSync.failed} 份简历快照稍后重试`
+            : "云端数据库已同步",
+          updatedAt:payload.updatedAt||"",
+        });
       }catch(error){
         if(cancelled) return;
         setCloud(prev=>({phase:"error",message:error?.message||"云端同步失败，当前数据仍保存在本地浏览器",updatedAt:prev.updatedAt||""}));
