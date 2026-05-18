@@ -56,6 +56,83 @@ function json(payload, status = 200) {
   });
 }
 
+function base64ToUint8Array(value) {
+  const binary = atob(String(value || ""));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function uint8ArrayToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function gzipTextToBase64(text) {
+  if (typeof CompressionStream === "undefined") return null;
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  return uint8ArrayToBase64(new Uint8Array(buffer));
+}
+
+async function gunzipBase64ToText(value) {
+  if (typeof DecompressionStream === "undefined") {
+    throw new Error("当前运行环境不支持解压云端状态");
+  }
+  const bytes = base64ToUint8Array(value);
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).text();
+}
+
+async function parseJsonMaybeCompressed(rawBody) {
+  let body = null;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return null;
+  }
+  if (body?.encoding === "gzip-base64" && body?.compressedState) {
+    const stateText = await gunzipBase64ToText(body.compressedState);
+    try {
+      return { state: JSON.parse(stateText) };
+    } catch {
+      return null;
+    }
+  }
+  return body;
+}
+
+async function encodeStatePayloadForStorage(state) {
+  const raw = JSON.stringify(state);
+  const compressed = await gzipTextToBase64(raw).catch(() => null);
+  if (!compressed || compressed.length >= raw.length) return raw;
+  return JSON.stringify({ encoding: "gzip-base64", compressedState: compressed });
+}
+
+async function decodeStatePayloadFromStorage(payload) {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (parsed?.encoding === "gzip-base64" && parsed?.compressedState) {
+    const stateText = await gunzipBase64ToText(parsed.compressedState);
+    try {
+      return JSON.parse(stateText);
+    } catch {
+      return null;
+    }
+  }
+  return parsed;
+}
+
 async function ensureStateTable(db) {
   await db.prepare(CREATE_STATE_TABLE_SQL).run();
   await db.prepare(CREATE_PREVIEW_TABLE_SQL).run();
@@ -303,12 +380,7 @@ function mergeStatePayloads(incoming, existing) {
 async function readState(db) {
   const row = await db.prepare(SELECT_STATE_SQL).bind(STATE_KEY).first();
   if (!row?.payload) return { state: null, updatedAt: "" };
-  let parsed = null;
-  try {
-    parsed = JSON.parse(row.payload);
-  } catch {
-    parsed = null;
-  }
+  const parsed = await decodeStatePayloadFromStorage(row.payload);
   // Preview blobs are fetched on-demand via /api/preview?id=xxx to keep
   // GET /api/state under the Cloudflare Workers CPU limit. The state JSON
   // here intentionally omits resumePreview/resumePreviewCloud payloads.
@@ -350,13 +422,7 @@ export async function onRequest(context) {
     if (rawBody.length > 4 * 1024 * 1024) {
       return json({ error: "请求体超过 4MB 限制" }, 413);
     }
-    const body = (() => {
-      try {
-        return JSON.parse(rawBody);
-      } catch {
-        return null;
-      }
-    })();
+    const body = await parseJsonMaybeCompressed(rawBody).catch(() => null);
     if (!body) return json({ error: "请求体不是合法 JSON" }, 400);
 
     const normalized = normalizeStatePayload(body);
@@ -370,10 +436,11 @@ export async function onRequest(context) {
         ...merged,
         cands: (merged.cands || []).map(stripCandidatePreview),
       };
+      const storedPayload = await encodeStatePayloadForStorage(strippedMerged);
       await env.DB.prepare(UPSERT_STATE_SQL)
         .bind(
           STATE_KEY,
-          JSON.stringify(strippedMerged),
+          storedPayload,
           strippedMerged.schemaVersion || SCHEMA_VERSION,
           now,
           now

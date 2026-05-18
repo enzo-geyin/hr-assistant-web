@@ -36,6 +36,27 @@ const buildCloudHeaders = token => {
   return headers;
 };
 
+const gzipTextToBase64 = async text => {
+  if (typeof CompressionStream === "undefined") return null;
+  const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+  const buffer = await new Response(stream).arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+};
+
+const buildCloudStateRequestBody = async state => {
+  const rawBody = JSON.stringify({ state });
+  const stateText = JSON.stringify(state);
+  const compressedState = await gzipTextToBase64(stateText).catch(() => null);
+  if (!compressedState || compressedState.length >= rawBody.length) return rawBody;
+  return JSON.stringify({ encoding: "gzip-base64", compressedState });
+};
+
 const pickCloudCfg = cfg => ({
   mode: cfg?.mode || DEFAULT_CFG.mode,
   provider: cfg?.provider || DEFAULT_CFG.provider,
@@ -335,10 +356,11 @@ export async function fetchCloudPreview(token = "", candidateId = "") {
 }
 
 async function pushCloudState(token = "", state) {
+  const body = await buildCloudStateRequestBody(state);
   const res = await fetch(ENV_STATE_URL, {
     method: "PUT",
     headers: { ...buildCloudHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ state }),
+    body,
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `云端保存失败 ${res.status}`);
