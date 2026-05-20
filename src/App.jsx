@@ -380,7 +380,7 @@ async function putCloudPreview(token = "", entry) {
   return data;
 }
 
-async function pushCloudPreviews(token = "", entries = []) {
+async function pushCloudPreviews(token = "", entries = [], onPreviewError = null) {
   const list = Array.isArray(entries) ? entries.filter(entry => entry?.candidateId && entry?.preview?.src) : [];
   if (!list.length) return { synced: 0, failed: 0 };
   let cursor = 0;
@@ -392,8 +392,10 @@ async function pushCloudPreviews(token = "", entries = []) {
       try {
         await putCloudPreview(token, entry);
         synced += 1;
-      } catch {
+        onPreviewError?.(entry.candidateId, "");
+      } catch (error) {
         failed += 1;
+        onPreviewError?.(entry.candidateId, error?.message || "Upload failed");
       }
     }
   });
@@ -2367,12 +2369,23 @@ export const createCloudResumePreview = async file => {
     // 之前一直用 JPEG 二次压缩，无论 quality 多高都有不可逆损耗——这是历次"糊"的根因。
     // PNG 单页约 2-3.5MB（A4 2975×4210 像素），PUT 4MB body 单候选人在兜底线内；
     // 多候选人批量同步逼近上限时，buildCloudSafeResumePreview 会自动回退到低清版。
-    return createResumeVisualPreview(file, {
+    const preview = await createResumeVisualPreview(file, {
       maxPages: 1,
       scale: 2.5,
       outputScale: 2,
       outputFormat: "png",
     });
+    const estimatedTotalSize = String(preview?.src || "").length + JSON.stringify(preview?.pages || []).length;
+    if (estimatedTotalSize > 3.8 * 1024 * 1024) {
+      return createResumeVisualPreview(file, {
+        maxPages: 1,
+        scale: 2.2,
+        outputScale: 2,
+        outputFormat: "jpeg",
+        imageQuality: 0.85,
+      });
+    }
+    return preview;
   }
   if (kind === "image") {
     // 图片简历直接压到 1400×1900、JPEG 95%。compressImageDataUrl 内部已用 PNG，
@@ -2891,6 +2904,7 @@ export default function App() {
   const [showCompare,setShowCompare]=useState(false);
   const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
   const [cloudHydrated,setCloudHydrated]=useState(false);
+  const [cloudPreviewErrors,setCloudPreviewErrors]=useState({});
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
   const [deletedCandidateIds,setDeletedCandidateIds]=useState(()=>load("hr_deleted_cands",[]));
   const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:"",dirtyCandidateState:false});
@@ -3027,7 +3041,16 @@ export default function App() {
         const currentCloudTs=latestCloudStateRef.current.cloudUpdatedAt?new Date(latestCloudStateRef.current.cloudUpdatedAt).getTime():0;
         const previewEntries=buildCloudPreviewEntries(cands,deletedCandidateIds,currentCloudTs);
         const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
-        const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries);
+        const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries,(candidateId,message)=>{
+          setCloudPreviewErrors(prev=>{
+            const key=String(candidateId||"");
+            if(!key) return prev;
+            const next={...prev};
+            if(message) next[key]=message;
+            else delete next[key];
+            return next;
+          });
+        });
         if(cancelled) return;
         latestCloudStateRef.current={...latestCloudStateRef.current,cloudUpdatedAt:payload.updatedAt||"",dirtyCandidateState:false};
         setCloud({
@@ -3478,7 +3501,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
       <main style={{flex:1,overflow:"auto"}}>
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport} cloud={cloud} jobComposer={jobComposer} questionTasks={questionTasks} interviewTasks={interviewTasks}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
-        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade}/>}
+        {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade} cloudPreviewErrors={cloudPreviewErrors}/>}
         {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
       </main>
     </div>
@@ -4400,7 +4423,7 @@ function JobsView({T,jobs,setJobs,cands,setCands,selJob,setSelJob,onCandClick,jo
 }
 
 // ─── CANDIDATES VIEW ─────────────────────────────────────────
-function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade}) {
+function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setTab,cfg,updCand,recordTokens,dirCtx,compared,toggleCompare,questionTasks,interviewTasks,startQuestionGeneration,startInterviewAssessment,removeCandidate,startCandidatePreviewUpgrade,cloudPreviewErrors={}}) {
   const [searchText,setSearchText]=useState("");
   const [sortMode,setSortMode]=useState("import"); // "import" | "interview"
   const sortedCands=useMemo(()=>{
@@ -4641,7 +4664,7 @@ function CandidatesView({T,cands,setCandsSynced,jobs,selCand,setSelCand,tab,setT
           })}
         </div>
       </div>
-      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} allCandidates={cands} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)} onReplaceResume={replaceCandidateResume}/>
+      {cand?<CandDetail T={T} cand={cand} job={job} jobs={jobs} allCandidates={cands} tab={tab} setTab={setTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} questionTask={questionTasks?.[cand.id]} interviewTask={interviewTasks?.[cand.id]} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} onDelete={()=>deleteCandidate(cand)} onReplaceResume={replaceCandidateResume} cloudPreviewUploadError={cloudPreviewErrors?.[cand.id]||""}/>
       :<Empty T={T} icon="◉" title="选择候选人" sub="从左侧选择，或勾选多人后点击「对比」"/>}
     </div>
   </Page>);

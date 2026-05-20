@@ -31,7 +31,15 @@ const pickBestDisplayPreview = (...previews) => previews
   .filter(preview => preview?.src)
   .sort((a, b) => displayPreviewWeight(b) - displayPreviewWeight(a))[0] || null;
 
-function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume}) {
+const formatCloudPreviewError = message => {
+  const text = String(message || "").trim();
+  if (/413|4mb|请求体超过|过大|too large|exceed|limit/i.test(text)) {
+    return "文件过大（4MB 限制）。重新上传原始 PDF 将自动优化压缩。";
+  }
+  return text || "云端简历快照加载失败";
+};
+
+function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,recordTokens,dirCtx,questionTask,interviewTask,startQuestionGeneration,startInterviewAssessment,onDelete,onReplaceResume,cloudPreviewUploadError=""}) {
   const [learning,setLearning]=useState({sampleCount:0,recentSamples:[],rubric:null,questionBank:null});
   const [learningState,setLearningState]=useState({loading:!!job?.id,error:""});
   const [showResumePreview,setShowResumePreview]=useState(true);
@@ -46,6 +54,8 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const [cloudPreview,setCloudPreview]=useState(null);
   const [cloudPreviewLoading,setCloudPreviewLoading]=useState(false);
   const [cloudPreviewError,setCloudPreviewError]=useState("");
+  const [cloudPreviewNotice,setCloudPreviewNotice]=useState("");
+  const [previewReloadSeq,setPreviewReloadSeq]=useState(0);
   const aiSuggestedJob=resolveMatchedJob(jobs, cand?.screening || {}, cand?.resume || "");
   const previewResume=(cand?.resume||"").trim();
   const readablePreview=buildReadableResumePreview(previewResume);
@@ -58,6 +68,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
   const visualPreview=pickBestDisplayPreview(embeddedPreview, cloudPreview);
   const proxyTokenRef = useRef(cfg?.proxyToken || "");
   useEffect(()=>{ proxyTokenRef.current = cfg?.proxyToken || ""; }, [cfg?.proxyToken]);
+  useEffect(()=>{ setCloudPreviewNotice(""); }, [cand?.id]);
   // 只依赖候选人本身（id / 状态 / 本地预览是否存在），不再因为 token 输入框
   // 每改一个字就重发请求，避免设置页编辑 token 时简历预览反复闪烁。
   useEffect(()=>{
@@ -65,6 +76,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
     setCloudPreviewError("");
     if(embeddedPreview?.src && embeddedPreview.previewMode!=="light") return;
     if(!cand?.id) return;
+    setCloudPreviewNotice("");
     // 不再依据 resumePreviewStatus==="none" 跳过云端 fetch：
     // 历史候选人可能被旧代码误标 none（其实云端有 preview）。
     // 单次 D1 SELECT 开销很小，宁可多查 404 也别让历史数据看上去"丢了"。
@@ -74,19 +86,25 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
       .then(preview=>{
         if(cancelled) return;
         setCloudPreview(preview||null);
+        if(preview?.src){
+          updCand?.(cand.id,{resumePreviewCloud:preview});
+          setCloudPreviewNotice("✓ 云端快照已同步");
+          window.setTimeout(()=>setCloudPreviewNotice(""),2600);
+        }
       })
       .catch(error=>{
         if(cancelled) return;
-        setCloudPreviewError(error?.message||"加载云端简历快照失败");
+        setCloudPreviewError(formatCloudPreviewError(error?.message));
       })
       .finally(()=>{
         if(cancelled) return;
         setCloudPreviewLoading(false);
       });
     return ()=>{cancelled=true;};
-  },[cand?.id, embeddedPreview?.src, embeddedPreview?.previewMode]);
+  },[cand?.id, embeddedPreview?.src, embeddedPreview?.previewMode, previewReloadSeq]);
   const previewPages = visualPreview?.pages?.length ? visualPreview.pages : (visualPreview?.src ? [visualPreview.src] : []);
   const currentPreviewSrc = previewPages[previewPage] || visualPreview?.src || "";
+  const effectiveCloudPreviewError = cloudPreviewError || (cloudPreviewUploadError ? formatCloudPreviewError(cloudPreviewUploadError) : "");
   const assignJob=jobIdValue=>{
     const nextJob=(jobs||[]).find(item=>String(item.id)===String(jobIdValue));
     updCand(cand.id,{jobId:nextJob?.id??null,questions:null});
@@ -350,7 +368,7 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
               {visualPreview?.previewMode==="light"?" · 当前先展示批量导入轻量预览":""}
               {cand.resumePreviewStatus==="generating"?" · 完整预览正在后台生成，稍后会自动补齐":""}
               {cloudPreviewLoading?" · 正在按需加载云端简历快照…":""}
-              {cloudPreviewError?` · 云端简历快照加载失败：${cloudPreviewError}`:""}
+              {effectiveCloudPreviewError?` · 云端简历快照加载失败：${effectiveCloudPreviewError}`:""}
             </div>
           </div>
           <button
@@ -360,6 +378,18 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
             {showResumePreview?"收起预览":"展开预览"}
           </button>
         </div>
+        {(cloudPreviewLoading||cloudPreviewNotice||effectiveCloudPreviewError)&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:12,padding:"10px 12px",borderRadius:12,border:`1px solid ${effectiveCloudPreviewError?"#fecaca":cloudPreviewLoading?"#bfdbfe":"#bbf7d0"}`,background:effectiveCloudPreviewError?"#fff5f5":cloudPreviewLoading?"#eff6ff":"#ecfdf5",color:effectiveCloudPreviewError?"#dc2626":cloudPreviewLoading?"#2563eb":"#059669",fontSize:12,fontWeight:800,lineHeight:1.6,flexWrap:"wrap"}}>
+          <span>
+            {cloudPreviewLoading?"正在加载云端简历快照...":effectiveCloudPreviewError?`⚠ 云端快照加载失败：${effectiveCloudPreviewError}`:cloudPreviewNotice}
+          </span>
+          {effectiveCloudPreviewError&&<button
+            type="button"
+            onClick={()=>setPreviewReloadSeq(seq=>seq+1)}
+            style={{padding:"6px 10px",borderRadius:9,border:"1px solid #fecaca",background:"#ffffff",color:"#dc2626",fontSize:11,fontWeight:900,cursor:"pointer"}}
+          >
+            重试加载
+          </button>}
+        </div>}
         {resumeKeywordHits.length>0&&<div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:12}}>
           {resumeKeywordHits.map(hit=><Chip key={hit} c="#92400e" bg="#fef3c7">{hit}</Chip>)}
         </div>}
