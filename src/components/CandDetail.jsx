@@ -942,6 +942,14 @@ function QCard({T,q,sourceMeta,onFeedbackChange}) {
           style={{...inSt(T),resize:"vertical",lineHeight:1.6,fontSize:12,background:"#fff"}}
           placeholder="记录这道题为什么有效、重复，或需要怎样优化问法..."
         />
+        {(q.feedbackTag||(q.feedbackNote||"").trim())?(
+          <div style={{marginTop:8,display:"flex",alignItems:"center",gap:6,padding:"6px 10px",borderRadius:8,background:"#f0fdf4",border:"1px solid #bbf7d0"}}>
+            <span style={{fontSize:12,color:"#16a34a",fontWeight:800}}>✓</span>
+            <span style={{fontSize:11,color:"#15803d",fontWeight:700,lineHeight:1.5}}>反馈已记录{feedbackOption?`：${feedbackOption.label}`:""}，会随候选人数据自动同步，无需手动提交</span>
+          </div>
+        ):(
+          <div style={{marginTop:8,fontSize:11,color:T.text4,fontWeight:600,lineHeight:1.5}}>选择上方标签或填写说明，反馈会自动保存并同步到云端</div>
+        )}
       </div>
     </div>}
   </div>);
