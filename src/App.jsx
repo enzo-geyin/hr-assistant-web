@@ -78,6 +78,11 @@ const previewPagesCount = preview => {
   return Array.isArray(preview.pages) && preview.pages.length ? preview.pages.length : 1;
 };
 
+const CLOUD_PREVIEW_TARGET_BYTES = Math.floor(2.8 * 1024 * 1024);
+const CLOUD_PREVIEW_UPLOAD_LIMIT_BYTES = 3.5 * 1024 * 1024;
+const firstPreviewPage = preview => preview?.src && Array.isArray(preview.pages) && preview.pages.length ? preview.pages[0] : preview?.src || "";
+const previewUploadSize = preview => String(firstPreviewPage(preview) || "").length;
+
 const previewWeight = preview => {
   if (!preview?.src) return 0;
   let score = 1;
@@ -94,36 +99,26 @@ const pickPreferredResumePreview = (primary, fallback) => {
   return previewWeight(primary) >= previewWeight(fallback) ? primary : fallback;
 };
 
-const buildCloudSafeResumePreview = candidate => {
-  // 优先用体积更大的版本（无损 PNG > 压缩 JPEG）。
-  // 历史上 cloud 版本总是低清 JPEG，但 PUT body 限制 4MB 是按整个 payload 算的，
-  // 单页 PNG 高清版约 1.5-3MB 通常安全，超限时再回退到 cloud 压缩版。
-  const local = candidate?.resumePreview;
-  const cloud = candidate?.resumePreviewCloud;
-  const localFirst = local?.src && Array.isArray(local.pages) && local.pages.length ? local.pages[0] : local?.src;
-  const cloudFirst = cloud?.src && Array.isArray(cloud.pages) && cloud.pages.length ? cloud.pages[0] : cloud?.src;
-  const SAFE_SINGLE_PAGE = 3.5 * 1024 * 1024; // 单页 base64 上限 3.5MB（PUT 4MB body 留余量）
-  let preview = null;
-  let firstPage = "";
-  if (localFirst && localFirst.length <= SAFE_SINGLE_PAGE && (!cloudFirst || localFirst.length >= cloudFirst.length)) {
-    preview = local;
-    firstPage = localFirst;
-  } else if (cloudFirst) {
-    preview = cloud;
-    firstPage = cloudFirst;
-  } else if (localFirst) {
-    preview = local;
-    firstPage = localFirst;
-  }
-  if (!preview?.src || !firstPage) return null;
+const toCloudPreviewPayload = (preview, candidate) => {
+  const firstPage = firstPreviewPage(preview);
+  if (!preview?.src || !firstPage || firstPage.length > CLOUD_PREVIEW_UPLOAD_LIMIT_BYTES) return null;
   return {
     kind: preview.kind || "image",
     src: firstPage,
-    pages: [firstPage],
+    pages: [],
     name: preview.name || candidate?.resumeFileName || "",
     pageCount: Number(preview.pageCount) || previewPagesCount(preview) || 1,
     previewMode: "cloud",
   };
+};
+
+const buildCloudSafeResumePreview = candidate => {
+  // 云端 D1 快照必须稳定低于 PUT 4MB 限制；任何超过 3.5MB 的候选都不进入上传队列。
+  const safePreviews = [candidate?.resumePreviewCloud, candidate?.resumePreview]
+    .map(preview => toCloudPreviewPayload(preview, candidate))
+    .filter(Boolean);
+  if (!safePreviews.length) return null;
+  return safePreviews.sort((a, b) => previewUploadSize(a) - previewUploadSize(b))[0];
 };
 
 const sanitizeCandidateForCloud = candidate => {
@@ -132,11 +127,13 @@ const sanitizeCandidateForCloud = candidate => {
   return rest;
 };
 
-const buildCloudPreviewEntries = (cands = [], deletedCandidateIds = [], changedSince = 0) => {
+const buildCloudPreviewEntries = (cands = [], deletedCandidateIds = [], changedSince = 0, retryCandidateIds = []) => {
   const cutoff = Number(changedSince) || 0;
+  const retrySet = new Set((retryCandidateIds || []).map(id => String(id)));
   return filterDeletedCandidates(cands, deletedCandidateIds)
     .filter(candidate => {
       if (!candidate?.id) return false;
+      if (retrySet.has(String(candidate.id))) return true;
       if (!cutoff) return true;
       return entityTime(candidate) >= cutoff - 5000;
     })
@@ -2295,20 +2292,54 @@ const dataUrlToImage = dataUrl => new Promise((resolve, reject) => {
   image.src = dataUrl;
 });
 
-const compressImageDataUrl = async (dataUrl, { maxWidth = 1600, maxHeight = 2200, quality = 0.95 } = {}) => {
+const compressImageDataUrl = async (dataUrl, { maxWidth = 1600, maxHeight = 2200, quality = 0.95, format = "png" } = {}) => {
   const image = await dataUrlToImage(dataUrl);
   const width = image.naturalWidth || image.width || 0;
   const height = image.naturalHeight || image.height || 0;
   if (!width || !height) return dataUrl;
   const ratio = Math.min(1, maxWidth / width, maxHeight / height);
-  if (ratio >= 1 && dataUrl.length <= 180000) return dataUrl;
+  const mime = format === "jpeg" ? "image/jpeg" : "image/png";
+  if (ratio >= 1 && dataUrl.length <= 180000 && (!dataUrl.startsWith("data:image/") || dataUrl.startsWith(`data:${mime}`))) return dataUrl;
   const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * ratio));
   canvas.height = Math.max(1, Math.round(height * ratio));
   const context = canvas.getContext("2d");
   if (!context) return dataUrl;
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/png");
+  return canvas.toDataURL(mime, quality);
+};
+
+const compressDataUrlForCloud = async dataUrl => {
+  let best = String(dataUrl || "");
+  if (!best || best.length <= CLOUD_PREVIEW_TARGET_BYTES) return best;
+  const attempts = [
+    { maxWidth: 1800, maxHeight: 2500, quality: 0.88 },
+    { maxWidth: 1600, maxHeight: 2200, quality: 0.84 },
+    { maxWidth: 1400, maxHeight: 1900, quality: 0.8 },
+    { maxWidth: 1200, maxHeight: 1700, quality: 0.74 },
+    { maxWidth: 1000, maxHeight: 1450, quality: 0.68 },
+    { maxWidth: 900, maxHeight: 1300, quality: 0.62 },
+    { maxWidth: 760, maxHeight: 1080, quality: 0.56 },
+  ];
+  for (const attempt of attempts) {
+    best = await compressImageDataUrl(best, { ...attempt, format: "jpeg" });
+    if (best.length <= CLOUD_PREVIEW_TARGET_BYTES) return best;
+  }
+  throw new Error("云端简历快照压缩后仍超过 3MB");
+};
+
+const createCloudResumePreviewFromExistingPreview = async preview => {
+  const firstPage = firstPreviewPage(preview);
+  if (!firstPage) return null;
+  const src = await compressDataUrlForCloud(firstPage);
+  return {
+    kind: preview?.kind || "image",
+    src,
+    pages: [],
+    name: preview?.name || "",
+    pageCount: Number(preview?.pageCount) || previewPagesCount(preview) || 1,
+    previewMode: "cloud",
+  };
 };
 
 export const createResumeVisualPreview = async (file, options = {}) => {
@@ -2365,38 +2396,20 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 终极清晰度方案：PNG 无损 + scale 2.5 × outputScale 2 = 5x 物理像素。
-    // 之前一直用 JPEG 二次压缩，无论 quality 多高都有不可逆损耗——这是历次"糊"的根因。
-    // PNG 单页约 2-3.5MB（A4 2975×4210 像素），PUT 4MB body 单候选人在兜底线内；
-    // 多候选人批量同步逼近上限时，buildCloudSafeResumePreview 会自动回退到低清版。
+    // 云端快照以「能稳定写入 D1」为第一目标：lightbox 的锐化显示负责可读性，
+    // 这里默认用可控 JPEG，并在超过 3MB 时继续压缩，避免 /api/preview 4MB PUT 限制。
     const preview = await createResumeVisualPreview(file, {
       maxPages: 1,
-      scale: 2.5,
+      scale: 1.55,
       outputScale: 2,
-      outputFormat: "png",
+      outputFormat: "jpeg",
+      imageQuality: 0.88,
     });
-    const estimatedTotalSize = String(preview?.src || "").length + JSON.stringify(preview?.pages || []).length;
-    if (estimatedTotalSize > 3.8 * 1024 * 1024) {
-      return createResumeVisualPreview(file, {
-        maxPages: 1,
-        scale: 2.2,
-        outputScale: 2,
-        outputFormat: "jpeg",
-        imageQuality: 0.85,
-      });
-    }
-    return preview;
+    return createCloudResumePreviewFromExistingPreview(preview);
   }
   if (kind === "image") {
-    // 图片简历直接压到 1400×1900、JPEG 95%。compressImageDataUrl 内部已用 PNG，
-    // 这里需要让它走 JPEG 路径——但 compressImageDataUrl 当前硬编码 PNG，
-    // 暂时保持现状（图片简历通常本身就是 JPEG，体积可控）。
-    return createResumeVisualPreview(file, {
-      imageQuality: 0.95,
-      forceImageCompression: true,
-      imageMaxWidth: 1400,
-      imageMaxHeight: 1900,
-    });
+    const preview = await createResumeVisualPreview(file);
+    return createCloudResumePreviewFromExistingPreview(preview);
   }
   return null;
 };
@@ -2905,6 +2918,8 @@ export default function App() {
   const [cloud,setCloud]=useState({phase:"loading",message:"正在连接云端数据库...",updatedAt:""});
   const [cloudHydrated,setCloudHydrated]=useState(false);
   const [cloudPreviewErrors,setCloudPreviewErrors]=useState({});
+  const [previewRetryNonce,setPreviewRetryNonce]=useState(0);
+  const [previewBackfill,setPreviewBackfill]=useState({running:false,total:0,done:0,failed:0,message:""});
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
   const [deletedCandidateIds,setDeletedCandidateIds]=useState(()=>load("hr_deleted_cands",[]));
   const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:"",dirtyCandidateState:false});
@@ -3033,13 +3048,32 @@ export default function App() {
   },[cfg.proxyToken]);
 
   useEffect(()=>{
+    if(!cloudHydrated || Object.keys(cloudPreviewErrors).length===0) return;
+    const timer=setTimeout(()=>setPreviewRetryNonce(n=>n+1),15000);
+    return()=>clearTimeout(timer);
+  },[cloudHydrated,cloudPreviewErrors]);
+
+  useEffect(()=>{
     if(!cloudHydrated) return;
     let cancelled=false;
     const timer=setTimeout(async()=>{
       try{
         setCloud(prev=>({...prev,phase:"syncing",message:"正在同步到云端数据库..."}));
         const currentCloudTs=latestCloudStateRef.current.cloudUpdatedAt?new Date(latestCloudStateRef.current.cloudUpdatedAt).getTime():0;
-        const previewEntries=buildCloudPreviewEntries(cands,deletedCandidateIds,currentCloudTs);
+        const retryCandidateIds=Object.keys(cloudPreviewErrors);
+        const previewEntries=buildCloudPreviewEntries(cands,deletedCandidateIds,currentCloudTs,retryCandidateIds);
+        const uploadableRetryIds=new Set(previewEntries.map(entry=>String(entry.candidateId)));
+        const oversizedRetryIds=retryCandidateIds.filter(id=>{
+          const candidate=cands.find(item=>String(item.id)===String(id));
+          return candidate && !uploadableRetryIds.has(String(id)) && (candidate.resumePreview?.src || candidate.resumePreviewCloud?.src);
+        });
+        if(oversizedRetryIds.length){
+          setCloudPreviewErrors(prev=>{
+            const next={...prev};
+            oversizedRetryIds.forEach(id=>{ next[id]="本地简历快照超过 3.5MB，需要点击设置页的一键重传重新压缩上传"; });
+            return next;
+          });
+        }
         const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
         const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries,(candidateId,message)=>{
           setCloudPreviewErrors(prev=>{
@@ -3056,7 +3090,7 @@ export default function App() {
         setCloud({
           phase:"ready",
           message:previewSync.failed>0
-            ? `云端状态已同步，${previewSync.failed} 份简历快照稍后重试`
+            ? `云端状态已同步，${previewSync.failed} 份简历快照上传失败（体积超限/网络错误），点击设置页按钮可立即重试`
             : "云端数据库已同步",
           updatedAt:payload.updatedAt||"",
         });
@@ -3066,7 +3100,7 @@ export default function App() {
       }
     },700);
     return()=>{cancelled=true;clearTimeout(timer);};
-  },[cloudHydrated,cfg.mode,cfg.provider,cfg.model,cfg.theme,cfg.proxyUrl,cfg.proxyToken,jobs,cands,usageLogs,deletedCandidateIds]);
+  },[cloudHydrated,cfg.mode,cfg.provider,cfg.model,cfg.theme,cfg.proxyUrl,cfg.proxyToken,jobs,cands,usageLogs,deletedCandidateIds,previewRetryNonce]);
 
   const T=getTheme(cfg.theme);
   const dirCtx=buildDirCtx(cands,jobs);
@@ -3098,6 +3132,40 @@ export default function App() {
     }catch{
       updCand(candidateId,{resumePreviewStatus:"failed"});
     }
+  };
+  const regenerateAllCloudSnapshots=async()=>{
+    if(previewBackfill.running) return;
+    const targets=filterDeletedCandidates(cands,deletedCandidateIds)
+      .filter(candidate=>candidate?.id && (candidate.resumePreview?.src || candidate.resumePreviewCloud?.src));
+    if(!targets.length){
+      setPreviewBackfill({running:false,total:0,done:0,failed:0,message:"当前浏览器里没有可用于重传的原始简历图片快照，需要重新上传 PDF 后才能生成。"});
+      return;
+    }
+    setPreviewBackfill({running:true,total:targets.length,done:0,failed:0,message:"正在重新压缩并上传云端简历快照..."});
+    let done=0;
+    let failed=0;
+    for(const candidate of targets){
+      try{
+        const source=pickPreferredResumePreview(candidate.resumePreviewCloud,candidate.resumePreview);
+        const preview=await createCloudResumePreviewFromExistingPreview(source);
+        const safePreview=toCloudPreviewPayload(preview,candidate);
+        if(!safePreview?.src) throw new Error("压缩后仍超过 3.5MB，需重新上传原始 PDF");
+        await putCloudPreview(cfg.proxyToken||"",{candidateId:candidate.id,preview:safePreview});
+        setCandsSynced(prev=>prev.map(item=>item.id===candidate.id?{...item,resumePreviewCloud:safePreview,resumePreviewStatus:item.resumePreviewStatus==="none"?"ready":item.resumePreviewStatus,updatedAt:new Date().toISOString()}:item));
+        setCloudPreviewErrors(prev=>{
+          const next={...prev};
+          delete next[candidate.id];
+          return next;
+        });
+        done+=1;
+      }catch(error){
+        failed+=1;
+        setCloudPreviewErrors(prev=>({...prev,[candidate.id]:error?.message||"云端快照重传失败"}));
+      }
+      setPreviewBackfill({running:true,total:targets.length,done,failed,message:`已处理 ${done+failed}/${targets.length}，成功 ${done}，失败 ${failed}`});
+    }
+    setPreviewBackfill({running:false,total:targets.length,done,failed,message:`云端快照重传完成：成功 ${done}，失败 ${failed}`});
+    setPreviewRetryNonce(n=>n+1);
   };
   const recordTokens=(inp,out,prov)=>{
     const d=todayStr();
@@ -3502,7 +3570,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport} cloud={cloud} jobComposer={jobComposer} questionTasks={questionTasks} interviewTasks={interviewTasks}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade} cloudPreviewErrors={cloudPreviewErrors}/>}
-        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus}/>}
+        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus} cands={cands} cloudPreviewErrors={cloudPreviewErrors} previewBackfill={previewBackfill} regenerateAllCloudSnapshots={regenerateAllCloudSnapshots}/>}
       </main>
     </div>
   );
@@ -4801,7 +4869,7 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
 // ─── SETTINGS VIEW ───────────────────────────────────────────
-function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud,modelStatus,reloadModelStatus}) {
+function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud,modelStatus,reloadModelStatus,cands=[],cloudPreviewErrors={},previewBackfill={running:false,total:0,done:0,failed:0,message:""},regenerateAllCloudSnapshots}) {
   const [keys,setKeys]=useState(cfg.apiKeys||{});
   const [saved,setSaved]=useState("");
   const saveKey=pid=>{setCfg(p=>({...p,apiKeys:{...p.apiKeys,[pid]:keys[pid]}}));setSaved(pid);setTimeout(()=>setSaved(""),1500);};
@@ -4832,6 +4900,12 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   const dayTotals=days.map(d=>({date:d,tokens:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.calls,0)}));
   const maxT=Math.max(...dayTotals.map(d=>d.tokens),1);
   const total={tokens:usageLogs.reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.reduce((s,r)=>s+r.calls,0)};
+  const localPreviewCount=(cands||[]).filter(candidate=>candidate?.resumePreview?.src || candidate?.resumePreviewCloud?.src).length;
+  const previewErrorCount=Object.keys(cloudPreviewErrors||{}).length;
+  const previewErrorNames=Object.entries(cloudPreviewErrors||{}).slice(0,5).map(([id,message])=>{
+    const candidate=(cands||[]).find(item=>String(item.id)===String(id));
+    return `${candidate?.name||candidate?.resumeFileName||id}：${message}`;
+  });
   const settingsShell={
     background:`linear-gradient(180deg, #ffffff 0%, ${T.surface} 100%)`,
     border:`1px solid ${T.border}`,
@@ -4910,6 +4984,28 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
               {cloud?.updatedAt&&<div style={{marginTop:6,color:T.text4}}>最近成功同步：{fmtCloudTime(cloud.updatedAt)}</div>}
               <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 里的数据；但如果你清浏览器缓存，只会丢本地副本，不会影响云端主数据。</div>
               <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。当前同步采用整库快照，多人同时改动时以后保存的内容会覆盖之前的保存。</div>
+            </div>
+            <div style={{marginTop:12,padding:"12px 14px",background:"#fff",border:`1px solid ${previewErrorCount?"#fecaca":T.border}`,borderRadius:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:900,color:T.text}}>云端简历图片快照补传</div>
+                  <div style={{fontSize:11,color:T.text4,lineHeight:1.7,marginTop:4}}>
+                    本地可重传 {localPreviewCount} 份；失败队列 {previewErrorCount} 份。会重新压缩到 3MB 以内再上传到 D1 的 hr_resume_previews。
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={regenerateAllCloudSnapshots}
+                  disabled={previewBackfill.running||!localPreviewCount}
+                  style={{padding:"9px 13px",background:previewBackfill.running||!localPreviewCount?"#e5e7eb":T.accent,color:previewBackfill.running||!localPreviewCount?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:previewBackfill.running||!localPreviewCount?"not-allowed":"pointer",fontSize:12,fontWeight:900}}
+                >
+                  {previewBackfill.running?"重传中...":"重新生成并上传所有云端简历快照"}
+                </button>
+              </div>
+              {(previewBackfill.message||previewErrorCount>0)&&<div style={{marginTop:10,fontSize:11,lineHeight:1.7,color:previewErrorCount?"#dc2626":T.text3,padding:"9px 10px",background:previewErrorCount?"#fff5f5":"#f8fafc",borderRadius:10}}>
+                {previewBackfill.message||`${previewErrorCount} 份简历快照上传失败，可点击按钮立即重传。`}
+                {previewErrorNames.length>0&&<div style={{marginTop:6,color:"#991b1b"}}>{previewErrorNames.join("；")}{previewErrorCount>previewErrorNames.length?"；...":""}</div>}
+              </div>}
             </div>
           </div>
         </div>
