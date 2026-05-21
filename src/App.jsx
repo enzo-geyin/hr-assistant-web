@@ -4996,12 +4996,15 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
                 <button
                   type="button"
                   onClick={regenerateAllCloudSnapshots}
-                  disabled={previewBackfill.running||!localPreviewCount}
-                  style={{padding:"9px 13px",background:previewBackfill.running||!localPreviewCount?"#e5e7eb":T.accent,color:previewBackfill.running||!localPreviewCount?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:previewBackfill.running||!localPreviewCount?"not-allowed":"pointer",fontSize:12,fontWeight:900}}
+                  disabled={previewBackfill.running}
+                  style={{padding:"9px 13px",background:previewBackfill.running?"#e5e7eb":T.accent,color:previewBackfill.running?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:previewBackfill.running?"not-allowed":"pointer",fontSize:12,fontWeight:900}}
                 >
                   {previewBackfill.running?"重传中...":"重新生成并上传所有云端简历快照"}
                 </button>
               </div>
+              {!localPreviewCount&&<div style={{marginTop:8,fontSize:11,lineHeight:1.7,color:"#b45309",padding:"9px 10px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10}}>
+                当前浏览器里没有可重传的图片快照。历史简历如果只剩识别文字，需要在候选人详情里重新上传原始 PDF，系统才会重新生成图片并写入云端 D1。
+              </div>}
               {(previewBackfill.message||previewErrorCount>0)&&<div style={{marginTop:10,fontSize:11,lineHeight:1.7,color:previewErrorCount?"#dc2626":T.text3,padding:"9px 10px",background:previewErrorCount?"#fff5f5":"#f8fafc",borderRadius:10}}>
                 {previewBackfill.message||`${previewErrorCount} 份简历快照上传失败，可点击按钮立即重传。`}
                 {previewErrorNames.length>0&&<div style={{marginTop:6,color:"#991b1b"}}>{previewErrorNames.join("；")}{previewErrorCount>previewErrorNames.length?"；...":""}</div>}
