@@ -3249,43 +3249,49 @@ export default function App() {
     setPreviewBackfill({running:false,total:targets.length,done,failed,message:`云端快照重传完成：成功 ${done}，失败 ${failed}`});
     setPreviewRetryNonce(n=>n+1);
   };
-  const migrateLegacyCloudSnapshots=async()=>{
+  const migrateLegacyCloudSnapshots=async(auditOnly=false)=>{
     if(legacyMigration.running) return;
     setLegacyMigration({running:true,message:"正在检查旧云端快照...",counts:null});
     try{
       const headers=buildCloudHeaders(cfg.proxyToken||"");
       const readAudit=async()=>{
-        const response=await fetch(ENV_PREVIEW_AUDIT_URL,{headers});
+        const response=await fetch(ENV_PREVIEW_AUDIT_URL,{headers,signal:AbortSignal.timeout(55000)});
         const data=await response.json().catch(()=>({}));
         if(!response.ok) throw new Error(data.error||`云端盘点失败 ${response.status}`);
         return data;
       };
       const before=await readAudit();
+      setLegacyMigration({running:true,message:"云端盘点已读取",counts:before.counts});
       if(!before.r2Bound || Number(before.counts?.unverified||0)>0){
         throw new Error("R2 绑定或读取验证不可用，请先检查 Cloudflare 配置");
       }
+      if(auditOnly){
+        setLegacyMigration({running:false,message:"云端盘点已完成，未修改简历资产。",counts:before.counts});
+        return;
+      }
       const targets=before.legacyOnly||[];
       let migrated=0;
-      let failed=0;
       for(const item of targets){
-        try{
-          const response=await fetch(ENV_RESUME_ASSETS_URL,{
-            method:"POST",
-            headers:{...headers,"Content-Type":"application/json"},
-            body:JSON.stringify({candidateId:item.candidateId,expectedVersion:item.expectedVersion||0,migrateLegacy:true}),
-          });
-          const data=await response.json().catch(()=>({}));
-          if(!response.ok) throw new Error(data.error||`迁移失败 ${response.status}`);
-          migrated+=1;
-        }catch{
-          failed+=1;
+        const response=await fetch(ENV_RESUME_ASSETS_URL,{
+          method:"POST",
+          signal:AbortSignal.timeout(55000),
+          headers:{...headers,"Content-Type":"application/json"},
+          body:JSON.stringify({candidateId:item.candidateId,expectedVersion:item.expectedVersion||0,migrateLegacy:true}),
+        });
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.error||`迁移失败 ${response.status}`);
+        const verified=await readAudit();
+        const ready=verified.ready?.find(entry=>String(entry.candidateId)===String(item.candidateId));
+        if(!ready || ready.assetId!==data.assetId || Number(ready.version)!==Number(data.version)){
+          throw new Error("迁移后的资产读回不一致，已停止后续写入，请重新盘点");
         }
-        setLegacyMigration({running:true,message:`已处理 ${migrated+failed}/${targets.length}，成功 ${migrated}，失败 ${failed}`,counts:before.counts});
+        migrated+=1;
+        setLegacyMigration({running:true,message:`已迁移并独立核验 ${migrated}/${targets.length} 份`,counts:verified.counts});
       }
       const after=await readAudit();
-      setLegacyMigration({running:false,message:`迁移完成：成功 ${migrated}，失败 ${failed}；R2 已核验 ${after.counts?.ready||0} 份，仍需补传 ${after.counts?.legacyOnly||0} 份。`,counts:after.counts});
+      setLegacyMigration({running:false,message:`迁移完成：本次成功 ${migrated} 份；R2 已核验 ${after.counts?.ready||0} 份，缺少云端图片 ${after.counts?.missing||0} 份。`,counts:after.counts});
     }catch(error){
-      setLegacyMigration({running:false,message:error?.message||"旧快照迁移失败",counts:null});
+      setLegacyMigration(prev=>({...prev,running:false,message:`操作已停止：${error?.message||"旧快照迁移失败"}`}));
     }
   };
   const recordTokens=(inp,out,prov)=>{
@@ -5115,11 +5121,19 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
                   <div style={{fontSize:13,fontWeight:900,color:T.text}}>旧云端快照迁移</div>
                   <div style={{fontSize:11,color:T.text4,lineHeight:1.7,marginTop:4}}>读取 D1 旧快照并补存到 R2；迁移后核验对象是否存在。</div>
                 </div>
-                <button type="button" onClick={migrateLegacyCloudSnapshots} disabled={legacyMigration.running}
+                <button type="button" onClick={()=>migrateLegacyCloudSnapshots(true)} disabled={legacyMigration.running}
+                  style={{padding:"9px 13px",background:"#fff",color:T.text,border:`1px solid ${T.border}`,borderRadius:8,cursor:legacyMigration.running?"not-allowed":"pointer",fontSize:12,fontWeight:900}}>
+                  只读盘点
+                </button>
+                <button type="button" onClick={()=>migrateLegacyCloudSnapshots(false)} disabled={legacyMigration.running}
                   style={{padding:"9px 13px",background:legacyMigration.running?"#e5e7eb":T.accent,color:legacyMigration.running?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:legacyMigration.running?"not-allowed":"pointer",fontSize:12,fontWeight:900}}>
                   {legacyMigration.running?"迁移中...":"检查并迁移旧快照"}
                 </button>
                 {legacyMigration.message&&<div style={{width:"100%",fontSize:11,color:T.text3,lineHeight:1.7}}>{legacyMigration.message}</div>}
+                {legacyMigration.counts&&<div style={{width:"100%",fontSize:12,color:T.text2,lineHeight:1.8}}>
+                  <div>候选人 {legacyMigration.counts.activeCandidates} 位；R2 图片 {legacyMigration.counts.ready} 份；待迁移旧快照 {legacyMigration.counts.legacyOnly} 份；缺少云端图片 {legacyMigration.counts.missing} 份。</div>
+                  <div>对象缺失 {legacyMigration.counts.missingObjects}；未核验 {legacyMigration.counts.unverified}；孤儿旧快照 {legacyMigration.counts.orphanedLegacy}；孤儿资产 {legacyMigration.counts.orphanedAssets}；版本异常 {legacyMigration.counts.stale}。</div>
+                </div>}
               </div>
               <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}>
                 <div>
