@@ -1,7 +1,9 @@
 -- 当前项目所有候选人主体数据保存在 hr_state.payload JSON 快照中；
 -- 候选人新增字段（如 scheduledAt / interviewLocation / interviewLink /
 -- interviewNotes / extractedQA）都随该 JSON 一起同步，无需独立 ALTER。
--- 简历快照体积较大，单独存 hr_resume_previews 表按需读取。
+-- 简历原文件和新快照保存在 R2 RESUME_ASSETS；
+-- D1 只保存资产索引、候选人 active ref 和事件日志。
+-- hr_resume_previews 是旧版 blob 表，仅作 legacy 读取和迁移来源。
 
 CREATE TABLE IF NOT EXISTS hr_state (
   state_key TEXT PRIMARY KEY,
@@ -16,6 +18,45 @@ CREATE TABLE IF NOT EXISTS hr_resume_previews (
   preview_payload TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hr_resume_assets (
+  asset_id TEXT PRIMARY KEY,
+  candidate_id TEXT NOT NULL,
+  asset_kind TEXT NOT NULL,
+  resume_signature TEXT,
+  file_name TEXT,
+  mime_type TEXT NOT NULL,
+  r2_key TEXT NOT NULL UNIQUE,
+  sha256 TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  version_no INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_resume_assets_candidate_version
+ON hr_resume_assets (candidate_id, version_no DESC);
+
+CREATE TABLE IF NOT EXISTS hr_candidate_resume_refs (
+  candidate_id TEXT PRIMARY KEY,
+  active_asset_id TEXT NOT NULL,
+  active_version INTEGER NOT NULL,
+  resume_signature TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS hr_resume_asset_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  candidate_id TEXT NOT NULL,
+  asset_id TEXT,
+  event_type TEXT NOT NULL,
+  event_payload TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hr_resume_asset_events_candidate_created
+ON hr_resume_asset_events (candidate_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS learning_samples (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

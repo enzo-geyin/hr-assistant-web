@@ -87,7 +87,12 @@ function CandDetail({T,cand,job,jobs,allCandidates=[],tab,setTab,cfg,updCand,rec
         if(cancelled) return;
         setCloudPreview(preview||null);
         if(preview?.src){
-          updCand?.(cand.id,{resumePreviewCloud:preview});
+          updCand?.(cand.id,{
+            resumePreviewCloud:preview,
+            ...(preview.resumeAssetId?{resumeAssetId:preview.resumeAssetId}:{}),
+            ...(preview.resumeAssetVersion?{resumeAssetVersion:preview.resumeAssetVersion}:{}),
+            ...(preview.resumeAssetVersion?{resumeAssetStatus:"ready",resumeAssetError:""}:{}),
+          });
           setCloudPreviewNotice("✓ 云端快照已同步");
           window.setTimeout(()=>setCloudPreviewNotice(""),2600);
         }

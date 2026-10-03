@@ -22,20 +22,8 @@ const SELECT_STATE_SQL = `
   WHERE state_key = ?
   LIMIT 1
 `;
-const SELECT_PREVIEWS_SQL = `
-  SELECT candidate_id, preview_payload, updated_at
-  FROM hr_resume_previews
-`;
-const UPSERT_PREVIEW_SQL = `
-  INSERT INTO hr_resume_previews (candidate_id, preview_payload, updated_at)
-  VALUES (?1, ?2, ?3)
-  ON CONFLICT(candidate_id) DO UPDATE SET
-    preview_payload = excluded.preview_payload,
-    updated_at = excluded.updated_at
-`;
-const DELETE_PREVIEW_SQL = `
-  DELETE FROM hr_resume_previews
-  WHERE candidate_id = ?
+const SELECT_RESUME_REFS_SQL = `
+  SELECT candidate_id, active_asset_id, active_version FROM hr_candidate_resume_refs
 `;
 const UPSERT_STATE_SQL = `
   INSERT INTO hr_state (state_key, payload, schema_version, created_at, updated_at)
@@ -268,16 +256,6 @@ function stripCandidatePreview(candidate) {
   return rest;
 }
 
-function extractPreviewEntries(cands = []) {
-  return (Array.isArray(cands) ? cands : [])
-    .filter(candidate => String(candidate?.id || "").trim() && candidate?.resumePreview?.src)
-    .map(candidate => ({
-      candidateId: String(candidate.id).trim(),
-      payload: JSON.stringify(candidate.resumePreview),
-      updatedAt: candidate.updatedAt || new Date().toISOString(),
-    }));
-}
-
 function mergeCandidateRecord(left, right) {
   const newer = entityTime(left) > entityTime(right) ? left : right;
   const older = newer === left ? right : left;
@@ -381,11 +359,31 @@ async function readState(db) {
   const row = await db.prepare(SELECT_STATE_SQL).bind(STATE_KEY).first();
   if (!row?.payload) return { state: null, updatedAt: "" };
   const parsed = await decodeStatePayloadFromStorage(row.payload);
+  let refs = [];
+  try {
+    refs = (await db.prepare(SELECT_RESUME_REFS_SQL).all()).results || [];
+  } catch (error) {
+    if (!String(error?.message || "").includes("no such table")) throw error;
+  }
+  const refsByCandidate = new Map(refs.map(ref => [String(ref.candidate_id), ref]));
+  const state = parsed && Array.isArray(parsed.cands)
+    ? { ...parsed, cands: parsed.cands.map(candidate => {
+        const ref = refsByCandidate.get(String(candidate?.id || ""));
+        if (!ref) return candidate;
+        return {
+          ...candidate,
+          resumeAssetId: ref.active_asset_id,
+          resumeAssetVersion: Number(ref.active_version) || 0,
+          resumeAssetStatus: "ready",
+          resumeAssetError: "",
+        };
+      }) }
+    : parsed;
   // Preview blobs are fetched on-demand via /api/preview?id=xxx to keep
   // GET /api/state under the Cloudflare Workers CPU limit. The state JSON
   // here intentionally omits resumePreview/resumePreviewCloud payloads.
   return {
-    state: parsed,
+    state,
     updatedAt: row.updated_at || "",
     schemaVersion: row.schema_version || SCHEMA_VERSION,
   };
@@ -430,8 +428,6 @@ export async function onRequest(context) {
     try {
       const existing = await readState(env.DB);
       const merged = mergeStatePayloads(normalized, normalizeStatePayload(existing?.state || {}));
-      const previewEntries = extractPreviewEntries(normalized.cands);
-      const deletedPreviewIds = new Set(normalizeDeletedIds(merged.deletedCandidateIds));
       const strippedMerged = {
         ...merged,
         cands: (merged.cands || []).map(stripCandidatePreview),
@@ -446,12 +442,6 @@ export async function onRequest(context) {
           now
         )
         .run();
-      for (const previewId of deletedPreviewIds) {
-        await env.DB.prepare(DELETE_PREVIEW_SQL).bind(previewId).run();
-      }
-      for (const entry of previewEntries) {
-        await env.DB.prepare(UPSERT_PREVIEW_SQL).bind(entry.candidateId, entry.payload, entry.updatedAt).run();
-      }
       return json({ ok: true, updatedAt: now });
     } catch (error) {
       return json({ error: error?.message || "保存云端状态失败" }, 500);

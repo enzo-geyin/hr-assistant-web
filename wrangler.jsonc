@@ -9,5 +9,11 @@
       "database_name": "hr-assistant-db",
       "database_id": "322eb018-2fe0-487d-a751-13de00bc1855"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "RESUME_ASSETS",
+      "bucket_name": "hr-resume-assets"
+    }
   ]
 }

@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { CandDetail } from "./components/CandDetail.jsx";
+import { extractDocxRawText } from "./lib/docx.js";
+import { PROVIDERS } from "./lib/providers.js";
 
 // ─── PERSIST ─────────────────────────────────────────────────
 const load = (k,d)=>{ try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}};
@@ -9,6 +11,8 @@ const ENV_PROXY_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_P
 const ENV_PROXY_TOKEN=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PROXY_TOKEN?import.meta.env.VITE_HR_PROXY_TOKEN:"";
 const ENV_STATE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_STATE_URL?import.meta.env.VITE_HR_STATE_URL:"/api/state";
 const ENV_PREVIEW_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PREVIEW_URL?import.meta.env.VITE_HR_PREVIEW_URL:"/api/preview";
+const ENV_RESUME_ASSETS_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_RESUME_ASSETS_URL?import.meta.env.VITE_HR_RESUME_ASSETS_URL:"/api/resume-assets";
+const ENV_PREVIEW_AUDIT_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_PREVIEW_AUDIT_URL?import.meta.env.VITE_HR_PREVIEW_AUDIT_URL:"/api/preview-audit";
 const ENV_KNOWLEDGE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_KNOWLEDGE_URL?import.meta.env.VITE_HR_KNOWLEDGE_URL:"/api/knowledge";
 const ENV_MODEL_STATUS_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_MODEL_STATUS_URL?import.meta.env.VITE_HR_MODEL_STATUS_URL:"/api/model-status";
 const ENV_TRANSCRIBE_URL=typeof import.meta!=="undefined"&&import.meta.env?.VITE_HR_TRANSCRIBE_URL?import.meta.env.VITE_HR_TRANSCRIBE_URL:"/api/transcribe";
@@ -134,11 +138,14 @@ const buildCloudPreviewEntries = (cands = [], deletedCandidateIds = [], changedS
     .filter(candidate => {
       if (!candidate?.id) return false;
       if (retrySet.has(String(candidate.id))) return true;
+      if (Number(candidate.resumeAssetVersion) > 0 && candidate.resumeAssetStatus !== "upload_failed") return false;
       if (!cutoff) return true;
       return entityTime(candidate) >= cutoff - 5000;
     })
     .map(candidate => ({
       candidateId: String(candidate.id).trim(),
+      expectedVersion: Number(candidate.resumeAssetVersion) || 0,
+      resumeSignature: candidate.resumeSignature || "",
       preview: buildCloudSafeResumePreview(candidate),
     }))
     .filter(entry => entry.candidateId && entry.preview?.src);
@@ -349,7 +356,57 @@ export async function fetchCloudPreview(token = "", candidateId = "") {
   const res = await fetch(url, { headers: buildCloudHeaders(token) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `云端简历快照读取失败 ${res.status}`);
-  return data?.preview || null;
+  if (!data?.preview?.src) return null;
+  return {
+    ...data.preview,
+    resumeAssetId: data.assetId || "",
+    resumeAssetVersion: Number(data.version) || 0,
+    resumeAssetSource: data.source || "",
+  };
+}
+
+async function putResumeAsset(token = "", { candidateId, file = null, preview = null, resumeSignature = "", expectedVersion = 0 } = {}) {
+  const id = String(candidateId || "").trim();
+  if (!id || !preview?.src) return null;
+  const form = new FormData();
+  form.append("candidateId", id);
+  form.append("expectedVersion", String(Number.isInteger(expectedVersion) && expectedVersion >= 0 ? expectedVersion : 0));
+  form.append("resumeSignature", resumeSignature || "");
+  form.append("preview", JSON.stringify(preview));
+  if (file) form.append("file", file, file.name || "resume-file");
+  const res = await fetch(ENV_RESUME_ASSETS_URL, {
+    method: "POST",
+    headers: buildCloudHeaders(token),
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `简历资产保存失败 ${res.status}`);
+  return data;
+}
+
+async function uploadResumeAssetPatch({ cfg, candidateId, file = null, preview = null, resumeSignature = "", expectedVersion = 0 }) {
+  if (!candidateId || !preview?.src) return { resumeAssetStatus: "missing_preview" };
+  try {
+    const asset = await putResumeAsset(cfg?.proxyToken || "", {
+      candidateId,
+      file,
+      preview,
+      resumeSignature,
+      expectedVersion,
+    });
+    return {
+      resumeAssetId: asset?.assetId || "",
+      resumeAssetVersion: Number(asset?.version) || Number(expectedVersion) || 0,
+      resumeAssetUpdatedAt: asset?.updatedAt || new Date().toISOString(),
+      resumeAssetStatus: "ready",
+      resumeAssetError: "",
+    };
+  } catch (error) {
+    return {
+      resumeAssetStatus: "upload_failed",
+      resumeAssetError: error?.message || "简历资产上传失败",
+    };
+  }
 }
 
 async function pushCloudState(token = "", state) {
@@ -364,19 +421,6 @@ async function pushCloudState(token = "", state) {
   return data;
 }
 
-async function putCloudPreview(token = "", entry) {
-  const id = String(entry?.candidateId || "").trim();
-  if (!id || !entry?.preview?.src) return null;
-  const res = await fetch(`${ENV_PREVIEW_URL}?id=${encodeURIComponent(id)}`, {
-    method: "PUT",
-    headers: { ...buildCloudHeaders(token), "Content-Type": "application/json" },
-    body: JSON.stringify({ preview: entry.preview }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `简历快照保存失败 ${res.status}`);
-  return data;
-}
-
 async function pushCloudPreviews(token = "", entries = [], onPreviewError = null) {
   const list = Array.isArray(entries) ? entries.filter(entry => entry?.candidateId && entry?.preview?.src) : [];
   if (!list.length) return { synced: 0, failed: 0 };
@@ -387,9 +431,14 @@ async function pushCloudPreviews(token = "", entries = [], onPreviewError = null
     while (cursor < list.length) {
       const entry = list[cursor++];
       try {
-        await putCloudPreview(token, entry);
+        const result = await putResumeAsset(token, {
+          candidateId: entry.candidateId,
+          preview: entry.preview,
+          resumeSignature: entry.resumeSignature || "",
+          expectedVersion: Number(entry.expectedVersion) || 0,
+        });
         synced += 1;
-        onPreviewError?.(entry.candidateId, "");
+        onPreviewError?.(entry.candidateId, "", result);
       } catch (error) {
         failed += 1;
         onPreviewError?.(entry.candidateId, error?.message || "Upload failed");
@@ -443,14 +492,6 @@ async function postKnowledgeAction(token = "", payload) {
   if (!res.ok) throw new Error(data.error || `学习数据写入失败 ${res.status}`);
   return data;
 }
-
-// ─── PROVIDERS ───────────────────────────────────────────────
-const PROVIDERS = {
-  claude:   {name:"Claude",  color:"#d97706",logo:"C",endpoint:"https://api.anthropic.com/v1/messages",          keyPlaceholder:"sk-ant-api03-...",models:[{id:"claude-sonnet-4-20250514",name:"Sonnet 4",note:"推荐"},{id:"claude-opus-4-5",name:"Opus 4.5",note:"最强"},{id:"claude-haiku-4-5-20251001",name:"Haiku 4.5",note:"极速"}],pricing:{"claude-sonnet-4-20250514":{in:3,out:15},"claude-opus-4-5":{in:15,out:75},"claude-haiku-4-5-20251001":{in:0.8,out:4}}},
-  openai:   {name:"ChatGPT", color:"#10a37f",logo:"G",endpoint:"https://api.openai.com/v1/chat/completions",      keyPlaceholder:"sk-...",           models:[{id:"gpt-4o",name:"GPT-4o",note:"旗舰"},{id:"gpt-4o-mini",name:"GPT-4o mini",note:"快速"},{id:"o1-mini",name:"o1-mini",note:"推理"}],pricing:{"gpt-4o":{in:2.5,out:10},"gpt-4o-mini":{in:0.15,out:0.6},"o1-mini":{in:1.1,out:4.4}}},
-  deepseek: {name:"DeepSeek",color:"#4f46e5",logo:"D",endpoint:"https://api.deepseek.com/v1/chat/completions",    keyPlaceholder:"sk-...",           models:[{id:"deepseek-v4-flash",name:"DeepSeek V4 Flash",note:"快速 / 非思考"},{id:"deepseek-v4-pro",name:"DeepSeek V4 Pro",note:"深度推理 / 思考模式"}],pricing:{"deepseek-v4-flash":{in:0.27,out:1.1},"deepseek-v4-pro":{in:0.55,out:2.19}}},
-  kimi:     {name:"KIMI",    color:"#0ea5e9",logo:"K",endpoint:"https://api.moonshot.cn/v1/chat/completions",     keyPlaceholder:"sk-...",           models:[{id:"moonshot-v1-32k",name:"Moonshot 32K",note:"推荐"},{id:"moonshot-v1-8k",name:"8K",note:"极速"},{id:"moonshot-v1-128k",name:"128K",note:"超长"}],pricing:{"moonshot-v1-8k":{in:0.012,out:0.012},"moonshot-v1-32k":{in:0.024,out:0.024},"moonshot-v1-128k":{in:0.06,out:0.06}}},
-};
 
 // ─── 总监判断 → AI 上下文 ────────────────────────────────────
 const buildDirCtx = (cands, jobs) => {
@@ -2216,17 +2257,8 @@ const ocrSource = async (source, label) => {
   return text;
 };
 
-const resolveMammoth = mod => {
-  const candidates = [mod, mod?.default, mod?.mammoth, mod?.default?.mammoth, globalThis?.mammoth];
-  return candidates.find(candidate => typeof candidate?.extractRawText === "function") || null;
-};
-
 const extractDocxText = async file => {
-  const mod = await import("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js").catch(()=>null);
-  const mammoth = resolveMammoth(mod);
-  if (!mammoth) throw new Error("Word 解析组件加载失败，请改用 PDF、图片或纯文本 JD");
-  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
-  return normalizeExtractedText(result?.value || "");
+  return normalizeExtractedText(await extractDocxRawText(file));
 };
 
 const extractImageText = async file => {
@@ -2396,8 +2428,8 @@ export const createResumeVisualPreview = async (file, options = {}) => {
 export const createCloudResumePreview = async file => {
   const kind = getFileKind(file);
   if (kind === "pdf") {
-    // 云端快照以「能稳定写入 D1」为第一目标：lightbox 的锐化显示负责可读性，
-    // 这里默认用可控 JPEG，并在超过 3MB 时继续压缩，避免 /api/preview 4MB PUT 限制。
+    // 云端快照以稳定写入 R2 并保持跨设备读取速度为目标；
+    // 这里默认用可控 JPEG，并在超过目标体积时继续压缩。
     const preview = await createResumeVisualPreview(file, {
       maxPages: 1,
       scale: 1.55,
@@ -2733,6 +2765,15 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
     resumeSignature,
   });
   if (duplicateCandidate) throw buildDuplicateResumeError(duplicateCandidate);
+  const assetPreview = resumePreviewCloud || toCloudPreviewPayload(resumePreview, { resumeFileName: file.name });
+  const assetPatch = await uploadResumeAssetPatch({
+    cfg,
+    candidateId: candidate?.id,
+    file,
+    preview: assetPreview,
+    resumeSignature,
+    expectedVersion: Number(candidate?.resumeAssetVersion) || 0,
+  });
   return {
     name: candidateName,
     jobId: matchedJob?.id ?? candidate?.jobId ?? null,
@@ -2741,6 +2782,7 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
     resumeFileName: file.name,
     resumePreview,
     resumePreviewCloud,
+    ...assetPatch,
     // 只要本地或云端任一有 preview src 就不是 none，避免本地生成失败但云端成功时
     // CandDetail short-circuit 跳过云端 fetch、导致看上去"图片丢了"。
     resumePreviewStatus: (resumePreview?.src || resumePreviewCloud?.src)
@@ -2758,6 +2800,7 @@ async function buildCandidateResumeUpdate({ candidate, cfg, job, file, onTokens,
 }
 
 async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx = "", name = "", jobs = [], existingCandidates = [], previewMode = "full", importMeta = {} }) {
+  const candidateId = Date.now() + Math.floor(Math.random() * 1000000);
   const resumePreview = previewMode
     ? await createResumeVisualPreview(
         file,
@@ -2782,9 +2825,18 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
     resumeSignature,
   });
   if (duplicateCandidate) throw buildDuplicateResumeError(duplicateCandidate);
+  const assetPreview = resumePreviewCloud || toCloudPreviewPayload(resumePreview, { resumeFileName: file.name });
+  const assetPatch = await uploadResumeAssetPatch({
+    cfg,
+    candidateId,
+    file,
+    preview: assetPreview,
+    resumeSignature,
+    expectedVersion: 0,
+  });
   return {
     candidate: {
-      id: Date.now() + Math.floor(Math.random() * 1000000),
+      id: candidateId,
       jobId: matchedJob?.id ?? null,
       name: candidateName,
       status: getCandidateStatusFromScore(screening.overallScore),
@@ -2794,6 +2846,7 @@ async function createCandidateFromResumeFile({ cfg, job, file, onTokens, dirCtx 
       resumeFileName: file.name,
       resumePreview,
       resumePreviewCloud,
+      ...assetPatch,
       // 同 buildCandidateResumeUpdate：本地/云端任一有 src 都视为有原始预览。
       resumePreviewStatus: (resumePreview?.src || resumePreviewCloud?.src)
         ? (resumePreview?.src && resumePreview?.previewMode==="light" ? "generating" : "ready")
@@ -2920,6 +2973,7 @@ export default function App() {
   const [cloudPreviewErrors,setCloudPreviewErrors]=useState({});
   const [previewRetryNonce,setPreviewRetryNonce]=useState(0);
   const [previewBackfill,setPreviewBackfill]=useState({running:false,total:0,done:0,failed:0,message:""});
+  const [legacyMigration,setLegacyMigration]=useState({running:false,message:"",counts:null});
   const [modelStatus,setModelStatus]=useState({loading:cfg.mode==="proxy",error:"",checkedAt:"",providers:[]});
   const [deletedCandidateIds,setDeletedCandidateIds]=useState(()=>load("hr_deleted_cands",[]));
   const latestCloudStateRef=useRef({cfg,jobs,cands,usageLogs,deletedCandidateIds,cloudUpdatedAt:"",dirtyCandidateState:false});
@@ -3075,7 +3129,7 @@ export default function App() {
           });
         }
         const payload=await pushCloudState(cfg.proxyToken||"",buildCloudSnapshot(cfg,jobs,cands,usageLogs,deletedCandidateIds));
-        const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries,(candidateId,message)=>{
+        const previewSync=await pushCloudPreviews(cfg.proxyToken||"",previewEntries,(candidateId,message,result)=>{
           setCloudPreviewErrors(prev=>{
             const key=String(candidateId||"");
             if(!key) return prev;
@@ -3084,6 +3138,19 @@ export default function App() {
             else delete next[key];
             return next;
           });
+          if(!message && result?.version){
+            setCandsSynced(prev=>prev.map(candidate=>String(candidate.id)===String(candidateId)
+              ? {
+                  ...candidate,
+                  resumeAssetId: result.assetId || candidate.resumeAssetId || "",
+                  resumeAssetVersion: Number(result.version) || Number(candidate.resumeAssetVersion) || 0,
+                  resumeAssetUpdatedAt: result.updatedAt || candidate.resumeAssetUpdatedAt || "",
+                  resumeAssetStatus: "ready",
+                  resumeAssetError: "",
+                }
+              : candidate
+            ),{markDirty:false});
+          }
         });
         if(cancelled) return;
         latestCloudStateRef.current={...latestCloudStateRef.current,cloudUpdatedAt:payload.updatedAt||"",dirtyCandidateState:false};
@@ -3136,7 +3203,8 @@ export default function App() {
   const regenerateAllCloudSnapshots=async()=>{
     if(previewBackfill.running) return;
     const targets=filterDeletedCandidates(cands,deletedCandidateIds)
-      .filter(candidate=>candidate?.id && (candidate.resumePreview?.src || candidate.resumePreviewCloud?.src));
+      .filter(candidate=>candidate?.id && (candidate.resumePreview?.src || candidate.resumePreviewCloud?.src))
+      .filter(candidate=>!Number(candidate.resumeAssetVersion) || candidate.resumeAssetStatus==="upload_failed");
     if(!targets.length){
       setPreviewBackfill({running:false,total:0,done:0,failed:0,message:"当前浏览器里没有可用于重传的原始简历图片快照，需要重新上传 PDF 后才能生成。"});
       return;
@@ -3150,8 +3218,22 @@ export default function App() {
         const preview=await createCloudResumePreviewFromExistingPreview(source);
         const safePreview=toCloudPreviewPayload(preview,candidate);
         if(!safePreview?.src) throw new Error("压缩后仍超过 3.5MB，需重新上传原始 PDF");
-        await putCloudPreview(cfg.proxyToken||"",{candidateId:candidate.id,preview:safePreview});
-        setCandsSynced(prev=>prev.map(item=>item.id===candidate.id?{...item,resumePreviewCloud:safePreview,resumePreviewStatus:item.resumePreviewStatus==="none"?"ready":item.resumePreviewStatus,updatedAt:new Date().toISOString()}:item));
+        const result=await putResumeAsset(cfg.proxyToken||"",{
+          candidateId:candidate.id,
+          preview:safePreview,
+          resumeSignature:candidate.resumeSignature||"",
+          expectedVersion:Number(candidate.resumeAssetVersion)||0,
+        });
+        setCandsSynced(prev=>prev.map(item=>item.id===candidate.id?{
+          ...item,
+          resumePreviewCloud:safePreview,
+          resumePreviewStatus:item.resumePreviewStatus==="none"?"ready":item.resumePreviewStatus,
+          resumeAssetId:result?.assetId||item.resumeAssetId||"",
+          resumeAssetVersion:Number(result?.version)||Number(item.resumeAssetVersion)||0,
+          resumeAssetUpdatedAt:result?.updatedAt||item.resumeAssetUpdatedAt||"",
+          resumeAssetStatus:"ready",
+          resumeAssetError:"",
+        }:item),{markDirty:false});
         setCloudPreviewErrors(prev=>{
           const next={...prev};
           delete next[candidate.id];
@@ -3166,6 +3248,45 @@ export default function App() {
     }
     setPreviewBackfill({running:false,total:targets.length,done,failed,message:`云端快照重传完成：成功 ${done}，失败 ${failed}`});
     setPreviewRetryNonce(n=>n+1);
+  };
+  const migrateLegacyCloudSnapshots=async()=>{
+    if(legacyMigration.running) return;
+    setLegacyMigration({running:true,message:"正在检查旧云端快照...",counts:null});
+    try{
+      const headers=buildCloudHeaders(cfg.proxyToken||"");
+      const readAudit=async()=>{
+        const response=await fetch(ENV_PREVIEW_AUDIT_URL,{headers});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok) throw new Error(data.error||`云端盘点失败 ${response.status}`);
+        return data;
+      };
+      const before=await readAudit();
+      if(!before.r2Bound || Number(before.counts?.unverified||0)>0){
+        throw new Error("R2 绑定或读取验证不可用，请先检查 Cloudflare 配置");
+      }
+      const targets=before.legacyOnly||[];
+      let migrated=0;
+      let failed=0;
+      for(const item of targets){
+        try{
+          const response=await fetch(ENV_RESUME_ASSETS_URL,{
+            method:"POST",
+            headers:{...headers,"Content-Type":"application/json"},
+            body:JSON.stringify({candidateId:item.candidateId,expectedVersion:item.expectedVersion||0,migrateLegacy:true}),
+          });
+          const data=await response.json().catch(()=>({}));
+          if(!response.ok) throw new Error(data.error||`迁移失败 ${response.status}`);
+          migrated+=1;
+        }catch{
+          failed+=1;
+        }
+        setLegacyMigration({running:true,message:`已处理 ${migrated+failed}/${targets.length}，成功 ${migrated}，失败 ${failed}`,counts:before.counts});
+      }
+      const after=await readAudit();
+      setLegacyMigration({running:false,message:`迁移完成：成功 ${migrated}，失败 ${failed}；R2 已核验 ${after.counts?.ready||0} 份，仍需补传 ${after.counts?.legacyOnly||0} 份。`,counts:after.counts});
+    }catch(error){
+      setLegacyMigration({running:false,message:error?.message||"旧快照迁移失败",counts:null});
+    }
   };
   const recordTokens=(inp,out,prov)=>{
     const d=todayStr();
@@ -3570,7 +3691,7 @@ T1维度(简历)：${JSON.stringify(candidate.screening?.t1?.items?.map(i=>({d:i
         {view==="dashboard"  &&<DashboardView T={T} jobs={jobs} cands={cands} dirStats={dirStats} onJobClick={id=>{setSelJob(id);setView("jobs");}} onCandClick={openCand} cfg={cfg} recordTokens={recordTokens} dirCtx={dirCtx} dashboardUpload={dashboardUpload} setDashboardUpload={setDashboardUpload} startDashboardResumeImport={startDashboardResumeImport} cloud={cloud} jobComposer={jobComposer} questionTasks={questionTasks} interviewTasks={interviewTasks}/>}
         {view==="jobs"       &&<JobsView T={T} jobs={jobs} setJobs={setJobs} cands={cands} setCands={setCands} selJob={selJob} setSelJob={setSelJob} onCandClick={openCand} jobComposer={jobComposer} setJobComposer={setJobComposer} resetJobComposer={resetJobComposer} applyParsedJobToComposer={applyParsedJobToComposer} startJobFileParse={startJobFileParse}/>}
         {view==="candidates" &&<CandidatesView T={T} cands={cands} setCandsSynced={setCandsSynced} jobs={jobs} selCand={selCand} setSelCand={setSelCand} tab={candTab} setTab={setCandTab} cfg={cfg} updCand={updCand} recordTokens={recordTokens} dirCtx={dirCtx} compared={compared} toggleCompare={toggleCompare} questionTasks={questionTasks} interviewTasks={interviewTasks} startQuestionGeneration={startQuestionGeneration} startInterviewAssessment={startInterviewAssessment} removeCandidate={removeCandidate} startCandidatePreviewUpgrade={startCandidatePreviewUpgrade} cloudPreviewErrors={cloudPreviewErrors}/>}
-        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus} cands={cands} cloudPreviewErrors={cloudPreviewErrors} previewBackfill={previewBackfill} regenerateAllCloudSnapshots={regenerateAllCloudSnapshots}/>}
+        {view==="settings"   &&<SettingsView T={T} cfg={cfg} setCfg={setCfg} usageLogs={usageLogs} dirStats={dirStats} dirDone={dirDone} dirMatch={dirMatch} jobs={jobs} cloud={cloud} modelStatus={modelStatus} reloadModelStatus={reloadModelStatus} cands={cands} cloudPreviewErrors={cloudPreviewErrors} previewBackfill={previewBackfill} regenerateAllCloudSnapshots={regenerateAllCloudSnapshots} legacyMigration={legacyMigration} migrateLegacyCloudSnapshots={migrateLegacyCloudSnapshots}/>}
       </main>
     </div>
   );
@@ -4869,7 +4990,7 @@ function ResumeImportModal({T,jobs,cands,cfg,recordTokens,dirCtx,onClose,onCreat
 
 // ─── CAND DETAIL ─────────────────────────────────────────────
 // ─── SETTINGS VIEW ───────────────────────────────────────────
-function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud,modelStatus,reloadModelStatus,cands=[],cloudPreviewErrors={},previewBackfill={running:false,total:0,done:0,failed:0,message:""},regenerateAllCloudSnapshots}) {
+function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,cloud,modelStatus,reloadModelStatus,cands=[],cloudPreviewErrors={},previewBackfill={running:false,total:0,done:0,failed:0,message:""},regenerateAllCloudSnapshots,legacyMigration={running:false,message:"",counts:null},migrateLegacyCloudSnapshots}) {
   const [keys,setKeys]=useState(cfg.apiKeys||{});
   const [saved,setSaved]=useState("");
   const saveKey=pid=>{setCfg(p=>({...p,apiKeys:{...p.apiKeys,[pid]:keys[pid]}}));setSaved(pid);setTimeout(()=>setSaved(""),1500);};
@@ -4900,7 +5021,10 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
   const dayTotals=days.map(d=>({date:d,tokens:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.filter(r=>r.date===d).reduce((s,r)=>s+r.calls,0)}));
   const maxT=Math.max(...dayTotals.map(d=>d.tokens),1);
   const total={tokens:usageLogs.reduce((s,r)=>s+r.input+r.output,0),calls:usageLogs.reduce((s,r)=>s+r.calls,0)};
-  const localPreviewCount=(cands||[]).filter(candidate=>candidate?.resumePreview?.src || candidate?.resumePreviewCloud?.src).length;
+  const localPreviewCount=(cands||[])
+    .filter(candidate=>candidate?.resumePreview?.src || candidate?.resumePreviewCloud?.src)
+    .filter(candidate=>!Number(candidate.resumeAssetVersion) || candidate.resumeAssetStatus==="upload_failed")
+    .length;
   const previewErrorCount=Object.keys(cloudPreviewErrors||{}).length;
   const previewErrorNames=Object.entries(cloudPreviewErrors||{}).slice(0,5).map(([id,message])=>{
     const candidate=(cands||[]).find(item=>String(item.id)===String(id));
@@ -4974,23 +5098,34 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
           <div style={{marginTop:14,padding:"14px 16px",background:"#ffffff",border:`1px solid ${T.border}`,borderRadius:16}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
               <div>
-                <div style={{fontSize:14,fontWeight:800,color:T.text}}>Cloudflare D1 同步状态</div>
-                <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>岗位、候选人、面试记录和调用统计会自动同步到云端，同时保留浏览器本地缓存兜底。</div>
+                <div style={{fontSize:14,fontWeight:800,color:T.text}}>Cloudflare 云端同步状态</div>
+                <div style={{fontSize:12,color:T.text4,marginTop:4,lineHeight:1.7}}>岗位、候选人、面试记录和调用统计写入 D1；简历原文件和图片快照写入 R2 资产库。</div>
               </div>
               <Chip c={cloudTone.c} bg={cloudTone.bg}>{cloudLabel}</Chip>
             </div>
             <div style={{fontSize:12,color:T.text2,lineHeight:1.8,padding:"10px 12px",background:T.card2,borderRadius:10,border:`1px solid ${T.border}`}}>
               <div>{cloud?.message||"等待云端同步状态..."}</div>
               {cloud?.updatedAt&&<div style={{marginTop:6,color:T.text4}}>最近成功同步：{fmtCloudTime(cloud.updatedAt)}</div>}
-              <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 里的数据；但如果你清浏览器缓存，只会丢本地副本，不会影响云端主数据。</div>
-              <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。当前同步采用整库快照，多人同时改动时以后保存的内容会覆盖之前的保存。</div>
+              <div style={{marginTop:6,color:T.text4}}>正常版本更新不会清空 D1 / R2；清浏览器缓存只会丢本地副本，不会影响云端资产。</div>
+              <div style={{marginTop:6,color:T.text4}}>如果你配置了「代理访问令牌」，云端数据接口也会复用同一个 Bearer token。简历资产写入带版本号，旧页面不能覆盖新版本。</div>
             </div>
             <div style={{marginTop:12,padding:"12px 14px",background:"#fff",border:`1px solid ${previewErrorCount?"#fecaca":T.border}`,borderRadius:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap",paddingBottom:12,marginBottom:12,borderBottom:`1px solid ${T.border}`}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:900,color:T.text}}>旧云端快照迁移</div>
+                  <div style={{fontSize:11,color:T.text4,lineHeight:1.7,marginTop:4}}>读取 D1 旧快照并补存到 R2；迁移后核验对象是否存在。</div>
+                </div>
+                <button type="button" onClick={migrateLegacyCloudSnapshots} disabled={legacyMigration.running}
+                  style={{padding:"9px 13px",background:legacyMigration.running?"#e5e7eb":T.accent,color:legacyMigration.running?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:legacyMigration.running?"not-allowed":"pointer",fontSize:12,fontWeight:900}}>
+                  {legacyMigration.running?"迁移中...":"检查并迁移旧快照"}
+                </button>
+                {legacyMigration.message&&<div style={{width:"100%",fontSize:11,color:T.text3,lineHeight:1.7}}>{legacyMigration.message}</div>}
+              </div>
               <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",flexWrap:"wrap"}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:900,color:T.text}}>云端简历图片快照补传</div>
+                  <div style={{fontSize:13,fontWeight:900,color:T.text}}>云端简历资产补传</div>
                   <div style={{fontSize:11,color:T.text4,lineHeight:1.7,marginTop:4}}>
-                    本地可重传 {localPreviewCount} 份；失败队列 {previewErrorCount} 份。会重新压缩到 3MB 以内再上传到 D1 的 hr_resume_previews。
+                    本地可补传 {localPreviewCount} 份；失败队列 {previewErrorCount} 份。会重新压缩预览并写入 R2，D1 只保存资产索引和版本号。
                   </div>
                 </div>
                 <button
@@ -4999,11 +5134,11 @@ function SettingsView({T,cfg,setCfg,usageLogs,dirStats,dirDone,dirMatch,jobs,clo
                   disabled={previewBackfill.running}
                   style={{padding:"9px 13px",background:previewBackfill.running?"#e5e7eb":T.accent,color:previewBackfill.running?T.text4:T.accentFg,border:"none",borderRadius:10,cursor:previewBackfill.running?"not-allowed":"pointer",fontSize:12,fontWeight:900}}
                 >
-                  {previewBackfill.running?"重传中...":"重新生成并上传所有云端简历快照"}
+                  {previewBackfill.running?"补传中...":"重新生成并上传所有云端简历资产"}
                 </button>
               </div>
               {!localPreviewCount&&<div style={{marginTop:8,fontSize:11,lineHeight:1.7,color:"#b45309",padding:"9px 10px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10}}>
-                当前浏览器里没有可重传的图片快照。历史简历如果只剩识别文字，需要在候选人详情里重新上传原始 PDF，系统才会重新生成图片并写入云端 D1。
+                当前浏览器里没有可补传的图片快照。历史简历如果只剩识别文字，需要在候选人详情里重新上传原始 PDF，系统才会重新生成图片并写入 R2。
               </div>}
               {(previewBackfill.message||previewErrorCount>0)&&<div style={{marginTop:10,fontSize:11,lineHeight:1.7,color:previewErrorCount?"#dc2626":T.text3,padding:"9px 10px",background:previewErrorCount?"#fff5f5":"#f8fafc",borderRadius:10}}>
                 {previewBackfill.message||`${previewErrorCount} 份简历快照上传失败，可点击按钮立即重传。`}
